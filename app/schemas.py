@@ -96,6 +96,8 @@ class ChatResponse(BaseModel):
     needs_follow_up: bool
     follow_up_topics: list[str] = Field(default_factory=list)
     source: str = "heuristic"
+    assistant_payload: dict[str, Any] = Field(default_factory=dict)
+    conflicts: list[dict[str, str]] = Field(default_factory=list)
     clarification_state: dict[str, Any] = Field(default_factory=dict)
 
 

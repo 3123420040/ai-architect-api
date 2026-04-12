@@ -78,12 +78,9 @@ def test_project_brief_chat_flow(client, session_payload):
     assert payload["brief_json"]["floors"] == 4
     assert "source" in payload
     assert isinstance(payload["follow_up_topics"], list)
+    assert "assistant_payload" in payload
     assert payload["clarification_state"]["total_sections"] >= 6
-    assert "Thông tin khu đất" in (
-        payload["clarification_state"]["blocking_missing"]
-        + payload["clarification_state"]["advisory_missing"]
-        + [section["label"] for section in payload["clarification_state"]["sections"]]
-    )
+    assert any(section["id"] == "site" for section in payload["clarification_state"]["sections"])
 
     history_response = client.get(
         f"/api/v1/projects/{project['id']}/chat/history",
@@ -123,6 +120,7 @@ def test_chat_websocket_stream_persists_turn(client, session_payload):
     assert done_payload is not None
     assert done_payload["brief_json"]["lot"]["width_m"] == 6
     assert done_payload["brief_json"]["floors"] == 3
+    assert "assistant_payload" in done_payload
     assert done_payload["clarification_state"]["total_sections"] >= 6
 
     history_response = client.get(

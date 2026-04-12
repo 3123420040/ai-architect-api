@@ -48,7 +48,7 @@ def _persist_turn(
     turn = generate_intake_turn(message, project.brief_json or {}, history)
     project.brief_json = turn["brief_json"]
     project.brief_status = "draft"
-    clarification_state = build_clarification_state(project.brief_json)
+    clarification_state = turn.get("clarification_state") or build_clarification_state(project.brief_json)
     db.add(
         ChatMessage(
             project_id=project.id,
@@ -58,6 +58,8 @@ def _persist_turn(
                 "needs_follow_up": turn["needs_follow_up"],
                 "follow_up_topics": turn["follow_up_topics"],
                 "source": turn["source"],
+                "assistant_payload": turn.get("assistant_payload", {}),
+                "conflicts": turn.get("conflicts", []),
                 "clarification_state": clarification_state,
             },
         )
@@ -71,6 +73,7 @@ def _persist_turn(
             "source": turn["source"],
             "needs_follow_up": turn["needs_follow_up"],
             "follow_up_topics": turn["follow_up_topics"],
+            "conflicts": turn.get("conflicts", []),
             "clarification_state": clarification_state,
         },
     )
@@ -98,6 +101,8 @@ def send_chat_message(
         needs_follow_up=turn["needs_follow_up"],
         follow_up_topics=turn["follow_up_topics"],
         source=turn["source"],
+        assistant_payload=turn.get("assistant_payload", {}),
+        conflicts=turn.get("conflicts", []),
         clarification_state=turn["clarification_state"],
     )
 
@@ -179,6 +184,8 @@ async def websocket_stream(websocket: WebSocket, project_id: str) -> None:
                     "needs_follow_up": turn["needs_follow_up"],
                     "follow_up_topics": turn["follow_up_topics"],
                     "source": turn["source"],
+                    "assistant_payload": turn.get("assistant_payload", {}),
+                    "conflicts": turn.get("conflicts", []),
                     "clarification_state": turn["clarification_state"],
                 }
             )

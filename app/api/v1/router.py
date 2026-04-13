@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import admin, annotations, auth, brief, chat, derivation, exports, feedback, generation, notifications, organizations, projects, reviews, share, uploads
+from app.api.v1 import admin, annotations, auth, brief, chat, derivation, exports, feedback, generation, notifications, organizations, presentation_3d, projects, reviews, share, uploads
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth.router)
@@ -15,6 +15,7 @@ router.include_router(share.router)
 router.include_router(feedback.router)
 router.include_router(exports.router)
 router.include_router(derivation.router)
+router.include_router(presentation_3d.router)
 router.include_router(notifications.router)
 router.include_router(uploads.router)
 router.include_router(admin.router)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -95,11 +95,30 @@ class DesignVersion(TimestampMixin, Base):
     export_urls: Mapped[dict] = mapped_column(JSON, default=dict)
     generation_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_presentation_3d_bundle_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey(
+            "presentation_3d_bundles.id",
+            use_alter=True,
+            name="fk_design_versions_current_presentation_3d_bundle_id",
+        ),
+        nullable=True,
+        index=True,
+    )
 
     project: Mapped["Project"] = relationship(back_populates="versions")
     packages: Mapped[list["ExportPackage"]] = relationship(back_populates="version", cascade="all, delete-orphan")
     annotations: Mapped[list["Annotation"]] = relationship(back_populates="version", cascade="all, delete-orphan")
     feedback_items: Mapped[list["Feedback"]] = relationship(back_populates="version", cascade="all, delete-orphan")
+    presentation_3d_bundles: Mapped[list["Presentation3DBundle"]] = relationship(
+        back_populates="version",
+        cascade="all, delete-orphan",
+        foreign_keys="Presentation3DBundle.version_id",
+    )
+    current_presentation_3d_bundle: Mapped["Presentation3DBundle | None"] = relationship(
+        foreign_keys=[current_presentation_3d_bundle_id],
+        post_update=True,
+    )
 
 
 class ExportPackage(TimestampMixin, Base):
@@ -124,6 +143,89 @@ class ExportPackage(TimestampMixin, Base):
 
     project: Mapped["Project"] = relationship(back_populates="packages")
     version: Mapped["DesignVersion"] = relationship(back_populates="packages")
+
+
+class Presentation3DBundle(TimestampMixin, Base):
+    __tablename__ = "presentation_3d_bundles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    version_id: Mapped[str] = mapped_column(String(36), ForeignKey("design_versions.id", ondelete="CASCADE"), index=True)
+    scene_spec_revision: Mapped[str] = mapped_column(String(50), default="v1")
+    status: Mapped[str] = mapped_column(String(50), default="queued", index=True)
+    qa_status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    approval_status: Mapped[str] = mapped_column(String(30), default="not_requested", index=True)
+    delivery_status: Mapped[str] = mapped_column(String(30), default="preview_only", index=True)
+    is_degraded: Mapped[bool] = mapped_column(Boolean, default=False)
+    degraded_reasons_json: Mapped[list] = mapped_column(JSON, default=list)
+    scene_spec_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    manifest_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    qa_report_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    runtime_metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    version: Mapped["DesignVersion"] = relationship(
+        back_populates="presentation_3d_bundles",
+        foreign_keys=[version_id],
+    )
+    jobs: Mapped[list["Presentation3DJob"]] = relationship(back_populates="bundle", cascade="all, delete-orphan")
+    assets: Mapped[list["Presentation3DAsset"]] = relationship(back_populates="bundle", cascade="all, delete-orphan")
+    approvals: Mapped[list["Presentation3DApproval"]] = relationship(back_populates="bundle", cascade="all, delete-orphan")
+
+
+class Presentation3DJob(TimestampMixin, Base):
+    __tablename__ = "presentation_3d_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    bundle_id: Mapped[str] = mapped_column(String(36), ForeignKey("presentation_3d_bundles.id", ondelete="CASCADE"), index=True)
+    job_type: Mapped[str] = mapped_column(String(50), default="generate_bundle")
+    status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    stage: Mapped[str] = mapped_column(String(50), default="scene_spec", index=True)
+    progress_percent: Mapped[int] = mapped_column(Integer, default=0)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    runtime_metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    bundle: Mapped["Presentation3DBundle"] = relationship(back_populates="jobs")
+
+
+class Presentation3DAsset(Base):
+    __tablename__ = "presentation_3d_assets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    bundle_id: Mapped[str] = mapped_column(String(36), ForeignKey("presentation_3d_bundles.id", ondelete="CASCADE"), index=True)
+    asset_type: Mapped[str] = mapped_column(String(50), index=True)
+    asset_role: Mapped[str] = mapped_column(String(100), index=True)
+    storage_key: Mapped[str] = mapped_column(String(500))
+    public_url: Mapped[str] = mapped_column(String(500))
+    content_type: Mapped[str] = mapped_column(String(100))
+    byte_size: Mapped[int] = mapped_column(Integer, default=0)
+    checksum: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    bundle: Mapped["Presentation3DBundle"] = relationship(back_populates="assets")
+
+
+class Presentation3DApproval(Base):
+    __tablename__ = "presentation_3d_approvals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    bundle_id: Mapped[str] = mapped_column(String(36), ForeignKey("presentation_3d_bundles.id", ondelete="CASCADE"), index=True)
+    decision: Mapped[str] = mapped_column(String(30))
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    bundle: Mapped["Presentation3DBundle"] = relationship(back_populates="approvals")
 
 
 class Annotation(TimestampMixin, Base):

@@ -33,3 +33,6 @@ def ping_task(payload: dict | None = None) -> dict:
 
 def queue_ping(payload: dict | None = None):
     return ping_task.delay(payload or {})
+
+
+from app.tasks import presentation_3d as _presentation_3d_tasks  # noqa: E402,F401

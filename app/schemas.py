@@ -178,6 +178,64 @@ class DerivationResponse(BaseModel):
     render_urls: list[str]
 
 
+class Presentation3DJobCreateRequest(BaseModel):
+    requested_outputs: dict[str, bool] = Field(
+        default_factory=lambda: {"scene_glb": True, "stills": True, "video": True}
+    )
+    presentation_mode: str = Field(default="client_presentation", min_length=1)
+    priority: str = Field(default="standard", min_length=1)
+
+
+class Presentation3DActionRequest(BaseModel):
+    decision: str | None = None
+    notes: str | None = None
+
+
+class Presentation3DAssetSummary(BaseModel):
+    url: str
+    checksum: str | None = None
+    shot_id: str | None = None
+    asset_role: str | None = None
+    width: int | None = None
+    height: int | None = None
+    duration_seconds: float | None = None
+    content_type: str | None = None
+
+
+class Presentation3DAssetsSummary(BaseModel):
+    scene_glb: Presentation3DAssetSummary | None = None
+    stills: list[Presentation3DAssetSummary] = Field(default_factory=list)
+    walkthrough_video: Presentation3DAssetSummary | None = None
+    manifest: Presentation3DAssetSummary | None = None
+    qa_report: Presentation3DAssetSummary | None = None
+
+
+class Presentation3DJobOut(BaseModel):
+    job_id: str
+    bundle_id: str
+    status: str
+    stage: str
+    progress_percent: int
+    attempt_count: int = 0
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class Presentation3DBundleOut(BaseModel):
+    bundle_id: str
+    version_id: str
+    status: str
+    qa_status: str
+    approval_status: str
+    delivery_status: str
+    is_degraded: bool = False
+    degraded_reasons: list[str] = Field(default_factory=list)
+    scene_spec_revision: str
+    assets: Presentation3DAssetsSummary = Field(default_factory=Presentation3DAssetsSummary)
+    current_job: Presentation3DJobOut | None = None
+    updated_at: datetime
+
+
 class UploadPresignRequest(BaseModel):
     filename: str = Field(min_length=1)
     content_type: str = Field(min_length=1)

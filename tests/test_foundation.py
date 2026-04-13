@@ -11,6 +11,7 @@ from app.db import SessionLocal
 from app.models import Organization, User
 from app.security import create_access_token, hash_password
 from app.tasks.worker import ping_task
+from tests.test_flows import complete_brief_payload
 
 
 def _create_user(*, role: str, email: str) -> User:
@@ -156,18 +157,15 @@ def test_generation_route_accepts_binary_gpu_payload(client, session_payload, mo
     assert project_response.status_code == 201
     project_id = project_response.json()["id"]
 
-    client.put(
+    brief_update = client.put(
         f"/api/v1/projects/{project_id}/brief",
         json={
-            "brief_json": {
-                "lot": {"width_m": 5, "depth_m": 20},
-                "floors": 3,
-                "style": "modern_minimalist",
-            },
+            "brief_json": complete_brief_payload(),
             "status": "confirmed",
         },
         headers={"Authorization": f"Bearer {token}"},
     )
+    assert brief_update.status_code == 200, brief_update.text
 
     monkeypatch.setattr(
         "app.api.v1.generation.generate_floorplans",

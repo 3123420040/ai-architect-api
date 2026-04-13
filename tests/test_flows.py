@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 def auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
@@ -350,6 +352,156 @@ def test_generation_review_share_revision_export_and_3d(client, session_payload)
     notifications = client.get("/api/v1/notifications", headers=auth_headers(token))
     assert notifications.status_code == 200
     assert len(notifications.json()["data"]) >= 3
+
+
+def test_phase6_presentation_bundle_flow(client, session_payload, monkeypatch):
+    from app.tasks.presentation_3d import run_presentation_3d_bundle_task
+
+    png_base64 = base64.b64encode(
+        base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9p0wVQAAAABJRU5ErkJggg=="
+        )
+    ).decode("utf-8")
+    video_base64 = base64.b64encode(b"phase6-video-placeholder").decode("utf-8")
+    glb_base64 = base64.b64encode(b"glTFphase6-placeholder").decode("utf-8")
+
+    def fake_render_presentation_bundle(*, bundle_id: str, scene_spec: dict, render_preset: str) -> dict:
+        artifacts = [
+            {
+                "asset_type": "scene",
+                "asset_role": "scene_glb",
+                "filename": "scene.glb",
+                "content_type": "model/gltf-binary",
+                "data_base64": glb_base64,
+            },
+            {
+                "asset_type": "video",
+                "asset_role": "walkthrough_video",
+                "filename": "walkthrough.mp4",
+                "content_type": "video/mp4",
+                "data_base64": video_base64,
+                "duration_seconds": 60,
+            },
+        ]
+        for shot in scene_spec.get("still_shots", []):
+            artifacts.append(
+                {
+                    "asset_type": "render",
+                    "asset_role": shot.get("asset_role") or "presentation_render",
+                    "filename": f"{shot['shot_id']}.png",
+                    "content_type": "image/png",
+                    "data_base64": png_base64,
+                    "width": 1600,
+                    "height": 900,
+                    "shot_id": shot["shot_id"],
+                }
+            )
+
+        return {
+            "status": "completed",
+            "bundle_id": bundle_id,
+            "artifacts": artifacts,
+            "runtime_metadata": {
+                "renderer": "test-runtime",
+                "render_preset": render_preset,
+            },
+        }
+
+    monkeypatch.setattr(
+        "app.tasks.presentation_3d.render_presentation_bundle",
+        fake_render_presentation_bundle,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.presentation_3d.queue_bundle_job",
+        lambda job_id: run_presentation_3d_bundle_task.apply(kwargs={"job_id": job_id}).get(),
+    )
+
+    session = register(client, session_payload)
+    token = session["access_token"]
+    project = create_project(client, token)
+    project_id = project["id"]
+
+    locked_brief = client.put(
+        f"/api/v1/projects/{project_id}/brief",
+        json={"brief_json": complete_brief_payload(), "status": "confirmed"},
+        headers=auth_headers(token),
+    )
+    assert locked_brief.status_code == 200, locked_brief.text
+
+    generation = client.post(
+        f"/api/v1/projects/{project_id}/generate",
+        json={"num_options": 1},
+        headers=auth_headers(token),
+    )
+    assert generation.status_code == 201, generation.text
+    version_id = generation.json()["versions"][0]["id"]
+
+    selected = client.post(
+        f"/api/v1/versions/{version_id}/select",
+        json={"comment": "Select for phase 6"},
+        headers=auth_headers(token),
+    )
+    assert selected.status_code == 200
+
+    approved = client.post(
+        f"/api/v1/reviews/{version_id}/approve",
+        json={"comment": "Lock for phase 6"},
+        headers=auth_headers(token),
+    )
+    assert approved.status_code == 200
+
+    export_response = client.post(
+        f"/api/v1/versions/{version_id}/exports",
+        headers=auth_headers(token),
+    )
+    assert export_response.status_code == 200, export_response.text
+    package_id = export_response.json()["package"]["id"]
+
+    issued = client.post(
+        f"/api/v1/packages/{package_id}/issue",
+        json={"note": "Issued for phase 6"},
+        headers=auth_headers(token),
+    )
+    assert issued.status_code == 200, issued.text
+
+    create_job = client.post(
+        f"/api/v1/versions/{version_id}/presentation-3d/jobs",
+        json={
+            "presentation_mode": "client_presentation",
+            "requested_outputs": {"scene_glb": True, "stills": True, "video": True},
+            "priority": "standard",
+        },
+        headers=auth_headers(token),
+    )
+    assert create_job.status_code == 202, create_job.text
+    bundle_id = create_job.json()["bundle_id"]
+
+    bundle_response = client.get(
+        f"/api/v1/versions/{version_id}/presentation-3d",
+        headers=auth_headers(token),
+    )
+    assert bundle_response.status_code == 200, bundle_response.text
+    bundle_payload = bundle_response.json()
+    assert bundle_payload["bundle_id"] == bundle_id
+    assert bundle_payload["qa_status"] == "pass"
+    assert bundle_payload["approval_status"] == "awaiting_approval"
+    assert bundle_payload["delivery_status"] == "preview_only"
+    assert bundle_payload["assets"]["scene_glb"]["url"].startswith("/media/projects/")
+    assert len(bundle_payload["assets"]["stills"]) >= 3
+    assert bundle_payload["assets"]["walkthrough_video"]["url"].endswith(".mp4")
+    assert bundle_payload["assets"]["manifest"]["url"].endswith("presentation_manifest.json")
+    assert bundle_payload["assets"]["qa_report"]["url"].endswith("qa_report.json")
+
+    approved_bundle = client.post(
+        f"/api/v1/presentation-3d/bundles/{bundle_id}/approve",
+        json={"notes": "Approved for client release"},
+        headers=auth_headers(token),
+    )
+    assert approved_bundle.status_code == 200, approved_bundle.text
+    approved_payload = approved_bundle.json()
+    assert approved_payload["status"] == "released"
+    assert approved_payload["approval_status"] == "approved"
+    assert approved_payload["delivery_status"] == "released"
 
 
 def test_project_current_version_ignores_superseded_versions(client, session_payload):

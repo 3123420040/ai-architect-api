@@ -111,3 +111,16 @@ def derive_3d_assets(version_id: str, brief_json: dict, floor_plan_url: str | No
         },
         "renders": [_fallback_render(brief_json, 0), _fallback_render(brief_json, 1)],
     }
+
+
+def render_presentation_bundle(*, bundle_id: str, scene_spec: dict, render_preset: str) -> dict:
+    payload = {
+        "bundle_id": bundle_id,
+        "scene_spec": scene_spec,
+        "render_preset": render_preset,
+        "requested_outputs": {"scene_glb": True, "stills": True, "video": True},
+    }
+    with httpx.Client(timeout=120.0) as client:
+        response = client.post(f"{settings.gpu_service_url}/presentation/render", json=payload)
+        response.raise_for_status()
+        return response.json()

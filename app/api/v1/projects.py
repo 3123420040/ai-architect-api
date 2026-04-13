@@ -12,6 +12,7 @@ from app.models import DesignVersion, ExportPackage, Project, User
 from app.schemas import Pagination, PaginatedProjects, ProjectCreate, ProjectUpdate
 from app.services.audit import log_action
 from app.services.briefing import build_clarification_state
+from app.services.brief_contract import build_brief_contract_payload
 
 
 router = APIRouter(
@@ -57,6 +58,8 @@ def _serialize_package(package: ExportPackage, versions: dict[str, DesignVersion
 def _serialize_project(project: Project, versions: list[DesignVersion]) -> dict:
     current = _pick_current_version(versions)
     version_by_id = {version.id: version for version in versions}
+    clarification_state = build_clarification_state(project.brief_json or {})
+    brief_contract = build_brief_contract_payload(project.brief_status, clarification_state)
     return {
         "id": project.id,
         "name": project.name,
@@ -65,7 +68,8 @@ def _serialize_project(project: Project, versions: list[DesignVersion]) -> dict:
         "status": project.status,
         "brief": project.brief_json,
         "brief_status": project.brief_status,
-        "clarification_state": build_clarification_state(project.brief_json or {}),
+        **brief_contract,
+        "clarification_state": clarification_state,
         "current_version_number": current.version_number if current else None,
         "current_version_status": current.status if current else None,
         "thumbnail_url": current.floor_plan_urls[0] if current and current.floor_plan_urls else None,
@@ -80,6 +84,18 @@ def _serialize_project(project: Project, versions: list[DesignVersion]) -> dict:
                 "render_urls": version.render_urls,
                 "option_label": version.option_label,
                 "option_description": version.option_description,
+                "option_title_vi": ((version.generation_metadata or {}).get("decision_metadata") or {}).get("option_title_vi") or version.option_label,
+                "option_summary_vi": ((version.generation_metadata or {}).get("decision_metadata") or {}).get("option_summary_vi") or version.option_description,
+                "option_strategy_key": ((version.generation_metadata or {}).get("option_strategy_profile") or {}).get("strategy_key"),
+                "option_strategy_label_vi": ((version.generation_metadata or {}).get("option_strategy_profile") or {}).get("title_vi"),
+                "fit_reasons": ((version.generation_metadata or {}).get("decision_metadata") or {}).get("fit_reasons") or [],
+                "strengths": ((version.generation_metadata or {}).get("decision_metadata") or {}).get("strengths") or [],
+                "caveats": ((version.generation_metadata or {}).get("decision_metadata") or {}).get("caveats") or [],
+                "metrics": ((version.generation_metadata or {}).get("decision_metadata") or {}).get("metrics") or {},
+                "compare_axes": ((version.generation_metadata or {}).get("decision_metadata") or {}).get("compare_axes") or [],
+                "decision_metadata_degraded": bool((((version.generation_metadata or {}).get("decision_metadata") or {}).get("degraded"))),
+                "decision_metadata_degraded_reasons": ((version.generation_metadata or {}).get("decision_metadata") or {}).get("degraded_reasons") or [],
+                "generation_source": (version.generation_metadata or {}).get("generation_source"),
                 "parent_version_id": version.parent_version_id,
                 "export_urls": version.export_urls,
                 "generation_metadata": version.generation_metadata,

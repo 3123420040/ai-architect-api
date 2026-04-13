@@ -63,6 +63,7 @@ def create_revision_from_review(
     db.add(feedback)
     db.flush()
     revision = create_revision(db, project=project, parent_version=target_version, feedback=feedback)
+    project.status = "options_generated"
     log_action(db, "review.revise", user_id=current_user.id, project_id=project.id, version_id=revision.id, details={"parent_version_id": target_version.id})
     db.commit()
     return {"id": revision.id, "parent_version_id": target_version.id, "status": revision.status}

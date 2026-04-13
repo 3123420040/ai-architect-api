@@ -9,9 +9,13 @@ from app.deps import get_current_user, get_user_from_access_token, require_roles
 from app.models import DesignVersion, Project, User
 from app.schemas import GenerateRequest, SelectOptionRequest
 from app.services.audit import create_notification, log_action
+from app.services.briefing import build_clarification_state
+from app.services.brief_contract import derive_brief_contract_state
+from app.services.decision_metadata import build_decision_metadata
 from app.services.exporter import build_sheet_bundle
 from app.services.geometry import ensure_geometry_v2, summarize_geometry
 from app.services.gpu_client import generate_floorplans
+from app.services.option_strategy_profiles import build_program_synthesis, resolve_option_strategy_profiles
 from app.services.state_machine import transition_version
 from app.services.storage import save_svg
 
@@ -33,6 +37,12 @@ def _get_project_for_user(db: Session, project_id: str, current_user: User) -> P
     return project
 
 
+def _assert_brief_locked(project: Project) -> None:
+    clarification_state = build_clarification_state(project.brief_json or {})
+    if derive_brief_contract_state(project.brief_status, clarification_state) != "locked":
+        raise HTTPException(status_code=409, detail="Brief must be locked before generation")
+
+
 def _generation_source(options: list[dict]) -> str:
     pipelines = [str(option.get("pipeline") or "") for option in options]
     if any(pipeline.startswith("svg-fallback") for pipeline in pipelines):
@@ -41,17 +51,34 @@ def _generation_source(options: list[dict]) -> str:
 
 
 def _serialize_versions(created_versions: list[DesignVersion]) -> list[dict]:
-    return [
-        {
-            "id": version.id,
-            "version_number": version.version_number,
-            "status": version.status,
-            "option_label": version.option_label,
-            "option_description": version.option_description,
-            "thumbnail_url": version.floor_plan_urls[0] if version.floor_plan_urls else None,
-        }
-        for version in created_versions
-    ]
+    serialized: list[dict] = []
+    for version in created_versions:
+        metadata = version.generation_metadata or {}
+        strategy = metadata.get("option_strategy_profile") or {}
+        decision = metadata.get("decision_metadata") or {}
+        serialized.append(
+            {
+                "id": version.id,
+                "version_number": version.version_number,
+                "status": version.status,
+                "option_label": version.option_label,
+                "option_description": version.option_description,
+                "option_title_vi": decision.get("option_title_vi") or version.option_label,
+                "option_summary_vi": decision.get("option_summary_vi") or version.option_description,
+                "option_strategy_key": strategy.get("strategy_key"),
+                "option_strategy_label_vi": strategy.get("title_vi"),
+                "fit_reasons": decision.get("fit_reasons") or [],
+                "strengths": decision.get("strengths") or [],
+                "caveats": decision.get("caveats") or [],
+                "metrics": decision.get("metrics") or {},
+                "compare_axes": decision.get("compare_axes") or strategy.get("compare_axes") or [],
+                "decision_metadata_degraded": bool(decision.get("degraded")),
+                "decision_metadata_degraded_reasons": decision.get("degraded_reasons") or [],
+                "generation_source": metadata.get("generation_source"),
+                "thumbnail_url": version.floor_plan_urls[0] if version.floor_plan_urls else None,
+            }
+        )
+    return serialized
 
 
 def _persist_generated_versions(
@@ -64,13 +91,21 @@ def _persist_generated_versions(
     created_versions: list[DesignVersion] = []
     version_number = _next_version_number(db, project.id)
     generation_source = _generation_source(options)
+    program_synthesis = build_program_synthesis(project.brief_json or {})
+    strategy_profiles = resolve_option_strategy_profiles(
+        project.brief_json or {},
+        program_synthesis,
+        num_options=len(options),
+    )
 
     for index, option in enumerate(options):
         version_value = version_number + index
+        strategy_profile = strategy_profiles[index] if index < len(strategy_profiles) else strategy_profiles[-1]
         geometry = ensure_geometry_v2(
             option.get("geometry_json") if isinstance(option, dict) else None,
             project.brief_json,
             index,
+            strategy_profile=strategy_profile,
         )
         preview_bundle = build_sheet_bundle(project.name, version_value, geometry)
         preview_sheet = next(
@@ -80,14 +115,24 @@ def _persist_generated_versions(
         floor_url = save_svg(f"projects/{project.id}/versions", preview_sheet["svg"])
         source_svg_url = save_svg(f"projects/{project.id}/versions/source", str(option.get("svg") or preview_sheet["svg"]))
         geometry_summary = summarize_geometry(geometry)
+        decision_metadata = build_decision_metadata(project.brief_json or {}, geometry_summary, strategy_profile)
+        option_title = str(
+            decision_metadata.get("option_title_vi")
+            or option.get("label")
+            or f"Phương án {index + 1}"
+        )
+        option_summary = str(
+            decision_metadata.get("option_summary_vi")
+            or option.get("description")
+            or f"Phương án dựng theo chiến lược {strategy_profile.get('title_vi') or 'rule-based'}."
+        )
 
         version = DesignVersion(
             project_id=project.id,
             version_number=version_value,
             status="generated",
-            option_label=option["label"],
-            option_description=option.get("description")
-            or f"Layer 2 option with {geometry_summary['room_count']} rooms / {geometry_summary['total_floor_area_m2']} m2",
+            option_label=option_title[:100],
+            option_description=option_summary[:500],
             brief_json=project.brief_json,
             geometry_json=geometry,
             floor_plan_urls=[floor_url],
@@ -101,19 +146,26 @@ def _persist_generated_versions(
                 "generation_source": generation_source,
                 "geometry_schema": geometry.get("$schema"),
                 "geometry_summary": geometry_summary,
+                "program_synthesis": program_synthesis,
+                "option_strategy_profile": strategy_profile,
+                "decision_metadata": decision_metadata,
             },
         )
         db.add(version)
         created_versions.append(version)
         db.flush()
 
-    project.status = "in_review"
+    project.status = "options_generated"
     log_action(
         db,
         "generation.complete",
         user_id=current_user.id,
         project_id=project.id,
-        details={"count": len(created_versions), "source": generation_source},
+        details={
+            "count": len(created_versions),
+            "source": generation_source,
+            "strategies": [item.get("strategy_key") for item in strategy_profiles],
+        },
     )
     create_notification(
         db,
@@ -134,8 +186,11 @@ def generate_options(
     current_user: User = Depends(require_roles("architect", "admin")),
 ) -> dict:
     project = _get_project_for_user(db, project_id, current_user)
+    _assert_brief_locked(project)
 
-    project.status = "generating"
+    project.status = "options_generating"
+    db.commit()
+    db.refresh(project)
     options = generate_floorplans(project.id, project.brief_json, payload.num_options)
     created_versions = _persist_generated_versions(
         db,
@@ -167,13 +222,21 @@ def select_option(
         raise HTTPException(status_code=404, detail="Project not found")
 
     transition_version(version, "under_review")
+    project.status = "under_review"
     for candidate in project.versions:
         if candidate.id != version.id and candidate.status == "generated":
             candidate.status = "superseded"
-    log_action(db, "version.select", user_id=current_user.id, project_id=project.id, version_id=version.id, details={"comment": payload.comment})
+    log_action(
+        db,
+        "version.select",
+        user_id=current_user.id,
+        project_id=project.id,
+        version_id=version.id,
+        details={"comment": payload.comment, "project_status": project.status},
+    )
     db.commit()
     db.refresh(version)
-    return {"id": version.id, "status": version.status}
+    return {"id": version.id, "status": version.status, "project_status": project.status}
 
 
 @router.websocket("/projects/{project_id}/generate/stream")
@@ -205,7 +268,8 @@ async def websocket_generate_stream(websocket: WebSocket, project_id: str) -> No
                 continue
 
             project = _get_project_for_user(db, project_id, current_user)
-            project.status = "generating"
+            _assert_brief_locked(project)
+            project.status = "options_generating"
             db.commit()
 
             await websocket.send_json(

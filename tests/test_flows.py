@@ -24,6 +24,24 @@ def create_project(client, token: str):
     return response.json()
 
 
+def complete_brief_payload() -> dict:
+    return {
+        "project_type": "townhouse",
+        "project_mode": "new_build",
+        "lot": {"width_m": 5, "depth_m": 20, "orientation": "south"},
+        "floors": 4,
+        "rooms": {"bedrooms": 4, "bathrooms": 4},
+        "style": "modern_minimalist",
+        "design_goals": ["Hien dai am, nhieu anh sang va thong gio tot"],
+        "household_profile": "Gia dinh 3 the he",
+        "occupant_count": 6,
+        "budget_vnd": 4_500_000_000,
+        "timeline_months": 8,
+        "special_requests": ["garage", "balcony", "prayer_room"],
+        "must_haves": ["gara o to", "phong tho", "lay sang tu nhien"],
+    }
+
+
 def test_health(client):
     response = client.get("/health")
     assert response.status_code == 200
@@ -61,11 +79,12 @@ def test_project_brief_chat_flow(client, session_payload):
 
     brief_response = client.put(
         f"/api/v1/projects/{project['id']}/brief",
-        json={"brief_json": {"style": "modern"}, "status": "confirmed"},
+        json={"brief_json": {"style": "modern"}, "status": "draft"},
         headers=auth_headers(token),
     )
     assert brief_response.status_code == 200
     assert brief_response.json()["brief_json"]["style"] == "modern"
+    assert brief_response.json()["brief_contract_state"] == "draft"
 
     chat_response = client.post(
         f"/api/v1/projects/{project['id']}/chat",
@@ -81,6 +100,7 @@ def test_project_brief_chat_flow(client, session_payload):
     assert "assistant_payload" in payload
     assert payload["clarification_state"]["total_sections"] >= 6
     assert any(section["id"] == "site" for section in payload["clarification_state"]["sections"])
+    assert payload["brief_contract_state"] in {"draft", "ready_to_lock", "reopened"}
 
     history_response = client.get(
         f"/api/v1/projects/{project['id']}/chat/history",
@@ -122,6 +142,7 @@ def test_chat_websocket_stream_persists_turn(client, session_payload):
     assert done_payload["brief_json"]["floors"] == 3
     assert "assistant_payload" in done_payload
     assert done_payload["clarification_state"]["total_sections"] >= 6
+    assert done_payload["brief_contract_state"] in {"draft", "ready_to_lock", "reopened"}
 
     history_response = client.get(
         f"/api/v1/projects/{project['id']}/chat/history",
@@ -129,6 +150,52 @@ def test_chat_websocket_stream_persists_turn(client, session_payload):
     )
     assert history_response.status_code == 200
     assert len(history_response.json()["messages"]) == 2
+
+
+def test_generation_requires_locked_brief_and_chat_reopens_brief(client, session_payload):
+    session = register(client, session_payload)
+    token = session["access_token"]
+    project = create_project(client, token)
+    project_id = project["id"]
+
+    locked_brief = client.put(
+        f"/api/v1/projects/{project_id}/brief",
+        json={"brief_json": complete_brief_payload(), "status": "confirmed"},
+        headers=auth_headers(token),
+    )
+    assert locked_brief.status_code == 200, locked_brief.text
+    assert locked_brief.json()["brief_contract_state"] == "locked"
+
+    generation = client.post(
+        f"/api/v1/projects/{project_id}/generate",
+        json={"num_options": 3},
+        headers=auth_headers(token),
+    )
+    assert generation.status_code == 201, generation.text
+
+    chat_response = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        json={"message": "Them them yeu cau co gieng troi va san sau nho"},
+        headers=auth_headers(token),
+    )
+    assert chat_response.status_code == 200
+    assert chat_response.json()["brief_contract_state"] == "reopened"
+
+    blocked_generation = client.post(
+        f"/api/v1/projects/{project_id}/generate",
+        json={"num_options": 3},
+        headers=auth_headers(token),
+    )
+    assert blocked_generation.status_code == 409
+    assert "Brief must be locked" in blocked_generation.text
+
+    relocked = client.put(
+        f"/api/v1/projects/{project_id}/brief",
+        json={"brief_json": {}, "status": "confirmed"},
+        headers=auth_headers(token),
+    )
+    assert relocked.status_code == 200
+    assert relocked.json()["brief_contract_state"] == "locked"
 
 
 def test_generation_review_share_revision_export_and_3d(client, session_payload):
@@ -140,11 +207,7 @@ def test_generation_review_share_revision_export_and_3d(client, session_payload)
     client.put(
         f"/api/v1/projects/{project_id}/brief",
         json={
-            "brief_json": {
-                "lot": {"width_m": 5, "depth_m": 20, "orientation": "south"},
-                "floors": 4,
-                "style": "modern_minimalist",
-            },
+            "brief_json": complete_brief_payload(),
             "status": "confirmed",
         },
         headers=auth_headers(token),
@@ -158,6 +221,10 @@ def test_generation_review_share_revision_export_and_3d(client, session_payload)
     assert generation.status_code == 201, generation.text
     versions = generation.json()["versions"]
     assert len(versions) == 3
+    assert generation.json()["status"] == "completed"
+    assert versions[0]["option_title_vi"]
+    assert isinstance(versions[0]["fit_reasons"], list)
+    assert versions[0]["option_strategy_key"]
 
     generated_project = client.get(
         f"/api/v1/projects/{project_id}",
@@ -165,6 +232,10 @@ def test_generation_review_share_revision_export_and_3d(client, session_payload)
     )
     assert generated_project.status_code == 200
     assert generated_project.json()["versions"][0]["generation_metadata"]["geometry_schema"] == "ai-architect-geometry-v2"
+    assert generated_project.json()["status"] == "options_generated"
+    assert generated_project.json()["brief_contract_state"] == "locked"
+    assert generated_project.json()["versions"][0]["option_title_vi"]
+    assert isinstance(generated_project.json()["versions"][0]["fit_reasons"], list)
 
     selected_version_id = versions[0]["id"]
     select_response = client.post(
@@ -174,6 +245,7 @@ def test_generation_review_share_revision_export_and_3d(client, session_payload)
     )
     assert select_response.status_code == 200
     assert select_response.json()["status"] == "under_review"
+    assert select_response.json()["project_status"] == "under_review"
 
     annotation_response = client.post(
         f"/api/v1/versions/{selected_version_id}/annotations",
@@ -289,11 +361,7 @@ def test_project_current_version_ignores_superseded_versions(client, session_pay
     client.put(
         f"/api/v1/projects/{project_id}/brief",
         json={
-            "brief_json": {
-                "lot": {"width_m": 5, "depth_m": 20, "orientation": "south"},
-                "floors": 4,
-                "style": "modern_minimalist",
-            },
+            "brief_json": complete_brief_payload(),
             "status": "confirmed",
         },
         headers=auth_headers(token),
@@ -315,6 +383,7 @@ def test_project_current_version_ignores_superseded_versions(client, session_pay
     assert selected_project.status_code == 200
     assert selected_project.json()["current_version_status"] == "generated"
     assert selected_project.json()["current_version_number"] == 3
+    assert selected_project.json()["status"] == "options_generated"
 
     select_response = client.post(
         f"/api/v1/versions/{selected_version_id}/select",
@@ -330,6 +399,7 @@ def test_project_current_version_ignores_superseded_versions(client, session_pay
     assert reviewing_project.status_code == 200
     assert reviewing_project.json()["current_version_status"] == "under_review"
     assert reviewing_project.json()["current_version_number"] == 1
+    assert reviewing_project.json()["status"] == "under_review"
 
     approve_response = client.post(
         f"/api/v1/reviews/{selected_version_id}/approve",
@@ -345,6 +415,7 @@ def test_project_current_version_ignores_superseded_versions(client, session_pay
     assert locked_project.status_code == 200
     assert locked_project.json()["current_version_status"] == "locked"
     assert locked_project.json()["current_version_number"] == 1
+    assert locked_project.json()["status"] == "locked"
 
     revision_response = client.post(
         f"/api/v1/reviews/{selected_version_id}/revise",
@@ -360,6 +431,7 @@ def test_project_current_version_ignores_superseded_versions(client, session_pay
     assert revision_project.status_code == 200
     assert revision_project.json()["current_version_status"] == "generated"
     assert revision_project.json()["current_version_number"] == 4
+    assert revision_project.json()["status"] == "options_generated"
 
 
 def test_generation_websocket_stream_returns_progress(client, session_payload):
@@ -372,9 +444,9 @@ def test_generation_websocket_stream_returns_progress(client, session_payload):
         f"/api/v1/projects/{project_id}/brief",
         json={
             "brief_json": {
+                **complete_brief_payload(),
                 "lot": {"width_m": 6, "depth_m": 18, "orientation": "east"},
                 "floors": 3,
-                "style": "modern_minimalist",
             },
             "status": "confirmed",
         },
@@ -402,3 +474,5 @@ def test_generation_websocket_stream_returns_progress(client, session_payload):
     assert done_payload is not None
     assert done_payload["source"] in {"remote_gpu", "fallback"}
     assert len(done_payload["versions"]) == 2
+    assert done_payload["versions"][0]["option_title_vi"]
+    assert isinstance(done_payload["versions"][0]["fit_reasons"], list)

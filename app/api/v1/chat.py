@@ -13,6 +13,7 @@ from app.models import ChatMessage, Project, User
 from app.schemas import ChatRequest, ChatResponse
 from app.services.audit import log_action
 from app.services.briefing import build_clarification_state
+from app.services.brief_contract import build_brief_contract_payload, next_brief_status_after_chat
 from app.services.llm import chunk_response_text, generate_intake_turn
 
 
@@ -47,8 +48,10 @@ def _persist_turn(
 
     turn = generate_intake_turn(message, project.brief_json or {}, history)
     project.brief_json = turn["brief_json"]
-    project.brief_status = "draft"
+    project.brief_status = next_brief_status_after_chat(project.brief_status)
+    project.status = "intake"
     clarification_state = turn.get("clarification_state") or build_clarification_state(project.brief_json)
+    brief_contract = build_brief_contract_payload(project.brief_status, clarification_state)
     db.add(
         ChatMessage(
             project_id=project.id,
@@ -61,6 +64,7 @@ def _persist_turn(
                 "assistant_payload": turn.get("assistant_payload", {}),
                 "conflicts": turn.get("conflicts", []),
                 "clarification_state": clarification_state,
+                "brief_contract": brief_contract,
             },
         )
     )
@@ -75,11 +79,13 @@ def _persist_turn(
             "follow_up_topics": turn["follow_up_topics"],
             "conflicts": turn.get("conflicts", []),
             "clarification_state": clarification_state,
+            "brief_contract": brief_contract,
         },
     )
     db.commit()
     db.refresh(project)
     turn["clarification_state"] = clarification_state
+    turn.update(brief_contract)
     return project, turn
 
 
@@ -104,6 +110,9 @@ def send_chat_message(
         assistant_payload=turn.get("assistant_payload", {}),
         conflicts=turn.get("conflicts", []),
         clarification_state=turn["clarification_state"],
+        brief_contract_state=turn["brief_contract_state"],
+        brief_contract_label=turn["brief_contract_label"],
+        brief_can_lock=turn["brief_can_lock"],
     )
 
 
@@ -187,6 +196,9 @@ async def websocket_stream(websocket: WebSocket, project_id: str) -> None:
                     "assistant_payload": turn.get("assistant_payload", {}),
                     "conflicts": turn.get("conflicts", []),
                     "clarification_state": turn["clarification_state"],
+                    "brief_contract_state": turn["brief_contract_state"],
+                    "brief_contract_label": turn["brief_contract_label"],
+                    "brief_can_lock": turn["brief_can_lock"],
                 }
             )
     except WebSocketDisconnect:

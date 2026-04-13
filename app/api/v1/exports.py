@@ -322,6 +322,7 @@ def issue_export_package(
 
     if version.status == "locked":
         transition_version(version, "handoff_ready")
+        project.status = "handoff_ready"
 
     handoff_bundle = _create_handoff_bundle(
         db,
@@ -384,6 +385,7 @@ def create_handoff_bundle(
 
     if version.status == "locked":
         transition_version(version, "handoff_ready")
+        project.status = "handoff_ready"
 
     bundle = _create_handoff_bundle(
         db,

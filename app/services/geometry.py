@@ -153,25 +153,37 @@ def _add_wall(
     )
 
 
-def build_geometry_v2(brief_json: dict[str, Any] | None, option_index: int = 0) -> dict[str, Any]:
+def build_geometry_v2(
+    brief_json: dict[str, Any] | None,
+    option_index: int = 0,
+    strategy_profile: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     brief = brief_json or {}
     lot = brief.get("lot") or {}
     style = str(brief.get("style") or "modern_minimalist")
+    strategy = strategy_profile or {}
+    rule_overrides = strategy.get("rule_overrides") or {}
+    strategy_key = str(strategy.get("strategy_key") or "")
     width = _clamp(float(lot.get("width_m") or 5.0), 4.0, 12.0)
     depth = _clamp(float(lot.get("depth_m") or 20.0), 12.0, 40.0)
     floors = int(_clamp(float(brief.get("floors") or 4), 2, 4))
     materials = _style_material(style)
     levels = _level_sequence(floors)
 
-    building_depth = _round(max(depth - 2.0, depth * 0.86))
+    building_depth_factor = float(rule_overrides.get("building_depth_factor") or 0.86)
+    front_zone_factor = 0.29 + (option_index % 3) * 0.02 + float(rule_overrides.get("front_zone_shift") or 0.0)
+    core_zone_factor = 0.16 + ((option_index + 1) % 3) * 0.015 + float(rule_overrides.get("core_zone_shift") or 0.0)
+    x_split_factor = float(rule_overrides.get("x_split") or (0.57 if option_index % 2 == 0 else 0.52))
+
+    building_depth = _round(max(depth - 2.0, depth * building_depth_factor))
     front_buffer = _round(max((depth - building_depth) / 2, 0.6))
     rear_buffer = _round(depth - building_depth - front_buffer)
 
-    front_zone = _round(building_depth * (0.29 + (option_index % 3) * 0.02))
-    core_zone = _round(building_depth * (0.16 + ((option_index + 1) % 3) * 0.015))
+    front_zone = _round(building_depth * front_zone_factor)
+    core_zone = _round(building_depth * core_zone_factor)
     rear_zone = _round(building_depth - front_zone - core_zone)
 
-    x_split = _round(width * (0.57 if option_index % 2 == 0 else 0.52))
+    x_split = _round(width * x_split_factor)
     service_width = _round(width - x_split)
 
     grids = {
@@ -688,6 +700,10 @@ def build_geometry_v2(brief_json: dict[str, Any] | None, option_index: int = 0) 
         "version": "2.0",
         "units": "metric",
         "precision": 3,
+        "design_intent": {
+            "strategy_key": strategy_key,
+            "option_index": option_index,
+        },
         "project_info": project_info,
         "grids": grids,
         "levels": levels,
@@ -721,10 +737,11 @@ def ensure_geometry_v2(
     geometry_json: dict[str, Any] | None,
     brief_json: dict[str, Any] | None,
     option_index: int = 0,
+    strategy_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if geometry_json and geometry_json.get("$schema") == LAYER_2_SCHEMA:
         return deepcopy(geometry_json)
-    return build_geometry_v2(brief_json or {}, option_index=option_index)
+    return build_geometry_v2(brief_json or {}, option_index=option_index, strategy_profile=strategy_profile)
 
 
 def summarize_geometry(geometry: dict[str, Any]) -> dict[str, Any]:
@@ -750,4 +767,3 @@ def geometry_room_index(geometry: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 def geometry_level_index(geometry: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {str(level["id"]): level for level in geometry.get("levels", [])}
-

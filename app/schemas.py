@@ -99,6 +99,9 @@ class ChatResponse(BaseModel):
     assistant_payload: dict[str, Any] = Field(default_factory=dict)
     conflicts: list[dict[str, str]] = Field(default_factory=list)
     clarification_state: dict[str, Any] = Field(default_factory=dict)
+    brief_contract_state: str = "draft"
+    brief_contract_label: str = "Đang làm rõ"
+    brief_can_lock: bool = False
 
 
 class GenerateRequest(BaseModel):

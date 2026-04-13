@@ -40,6 +40,7 @@ def approve_version(
     project, version = _get_version(db, version_id, current_user)
     transition_version(version, "approved")
     transition_version(version, "locked")
+    project.status = "locked"
     version.reviewed_by = current_user.id
     version.reviewed_at = datetime.now(timezone.utc)
     version.approval_status = "approved"
@@ -67,6 +68,7 @@ def reject_version(
         raise HTTPException(status_code=400, detail="Reject reason is required")
     project, version = _get_version(db, version_id, current_user)
     transition_version(version, "rejected")
+    project.status = "rejected"
     version.reviewed_by = current_user.id
     version.reviewed_at = datetime.now(timezone.utc)
     version.approval_status = "rejected"

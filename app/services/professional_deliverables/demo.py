@@ -94,7 +94,8 @@ def generate_golden_bundle(output_root: Path | None = None, *, require_dwg: bool
             conversion = convert_dxf_directory_to_dwg(temp_input_dir, temp_dir, require_binary=require_dwg)
         except ODAConverterError as exc:
             if require_dwg:
-                dwg_gate_override = GateResult("DWG clean-open", "fail", str(exc).splitlines()[0])
+                detail = " | ".join(line for line in str(exc).splitlines() if line.strip())
+                dwg_gate_override = GateResult("DWG clean-open", "fail", detail[:700])
             conversion = None
         if conversion:
             dwg_paths = _copy_dwg_outputs(temp_dir, two_d_dir, expected_stems)

@@ -84,6 +84,7 @@ def generate_golden_bundle(output_root: Path | None = None, *, require_dwg: bool
     expected_stems = {sheet.filename_stem for sheet in sheets}
 
     dwg_paths: tuple[Path, ...] = ()
+    dwg_gate_override: GateResult | None = None
     with tempfile.TemporaryDirectory(prefix="oda-dxf-") as temp_input_name, tempfile.TemporaryDirectory(prefix="oda-dwg-") as temp_name:
         temp_input_dir = Path(temp_input_name)
         for path in dxf_paths:
@@ -91,9 +92,9 @@ def generate_golden_bundle(output_root: Path | None = None, *, require_dwg: bool
         temp_dir = Path(temp_name)
         try:
             conversion = convert_dxf_directory_to_dwg(temp_input_dir, temp_dir, require_binary=require_dwg)
-        except ODAConverterError:
+        except ODAConverterError as exc:
             if require_dwg:
-                raise
+                dwg_gate_override = GateResult("DWG clean-open", "fail", str(exc).splitlines()[0])
             conversion = None
         if conversion:
             dwg_paths = _copy_dwg_outputs(temp_dir, two_d_dir, expected_stems)
@@ -101,8 +102,9 @@ def generate_golden_bundle(output_root: Path | None = None, *, require_dwg: bool
     pdf_path = write_pdf_bundle(project, sheets, two_d_dir / "bundle.pdf")
 
     audit_dir = two_d_dir / ".audit-dxf"
+    dwg_gate = dwg_gate_override or validate_dwg_clean_open(two_d_dir, audit_dir, require_dwg=require_dwg)
     gate_results = [
-        validate_dwg_clean_open(two_d_dir, audit_dir, require_dwg=require_dwg),
+        dwg_gate,
         validate_all_dxf_layers(list(dxf_paths)),
         validate_pdf_diacritics(pdf_path),
         validate_pdf_font_embedding(pdf_path),

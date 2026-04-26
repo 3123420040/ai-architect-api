@@ -1,0 +1,57 @@
+name: Sprint 1 Deliverables
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  PYTHONPATH: .
+  ODA_FILE_CONVERTER_BIN: /usr/bin/ODAFileConverter
+
+jobs:
+  sprint1-2d-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install ODA File Converter
+        env:
+          ODA_DEB_URL: ${{ vars.ODA_DEB_URL }}
+        run: |
+          test -n "$ODA_DEB_URL"
+          sudo apt-get update
+          sudo apt-get install -y wget xvfb
+          wget -q "$ODA_DEB_URL" -O /tmp/oda.deb
+          sudo apt-get install -y /tmp/oda.deb || sudo dpkg -i /tmp/oda.deb || true
+          sudo apt-get install -f -y
+          which ODAFileConverter
+
+      - name: Generate golden 2D bundle and run gates
+        run: make sprint1-ci
+
+      - name: Upload Sprint 1 gate summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sprint1-gate-summary
+          path: storage/professional-deliverables/project-golden-townhouse/2d/sprint1_gate_summary.md
+          if-no-files-found: ignore
+
+      - name: Comment Sprint 1 gate summary
+        if: always() && github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: sprint1-deliverables
+          path: storage/professional-deliverables/project-golden-townhouse/2d/sprint1_gate_summary.md
+

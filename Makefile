@@ -1,4 +1,4 @@
-.PHONY: sprint1-demo sprint1-demo-local sprint1-ci test
+.PHONY: sprint1-demo sprint1-demo-local sprint1-ci sprint2-demo sprint2-demo-local sprint2-ci test
 
 PYTHON ?= $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python; fi)
 
@@ -10,6 +10,16 @@ sprint1-demo-local:
 
 sprint1-ci:
 	PYTHONPATH=. $(PYTHON) -m app.services.professional_deliverables.demo --require-dwg
+	PYTHONPATH=. $(PYTHON) -m pytest tests/professional_deliverables
+
+sprint2-demo:
+	PYTHONPATH=. $(PYTHON) -m app.services.professional_deliverables.sprint2_demo --require-external-tools
+
+sprint2-demo-local:
+	PYTHONPATH=. $(PYTHON) -m app.services.professional_deliverables.sprint2_demo --allow-missing-external-tools
+
+sprint2-ci:
+	PYTHONPATH=. $(PYTHON) -m app.services.professional_deliverables.sprint2_demo --require-external-tools
 	PYTHONPATH=. $(PYTHON) -m pytest tests/professional_deliverables
 
 test:

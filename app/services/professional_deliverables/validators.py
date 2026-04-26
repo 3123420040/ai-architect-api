@@ -150,12 +150,20 @@ def build_file_inventory(paths: list[Path], root: Path) -> list[dict[str, Any]]:
     return inventory
 
 
-def write_gate_outputs(output_dir: Path, gate_results: list[GateResult], inventory: list[dict[str, Any]]) -> tuple[Path, Path]:
-    json_path = output_dir / "sprint1_gate_summary.json"
-    md_path = output_dir / "sprint1_gate_summary.md"
+def write_gate_outputs(
+    output_dir: Path,
+    gate_results: list[GateResult],
+    inventory: list[dict[str, Any]],
+    *,
+    basename: str = "sprint1_gate_summary",
+    title: str = "Sprint 1 Gate Summary",
+    skipped_is_partial: bool = True,
+) -> tuple[Path, Path]:
+    json_path = output_dir / f"{basename}.json"
+    md_path = output_dir / f"{basename}.md"
     if any(result.status == "fail" for result in gate_results):
         overall_status = "fail"
-    elif any(result.status == "skipped" for result in gate_results):
+    elif skipped_is_partial and any(result.status == "skipped" for result in gate_results):
         overall_status = "partial"
     else:
         overall_status = "pass"
@@ -165,7 +173,7 @@ def write_gate_outputs(output_dir: Path, gate_results: list[GateResult], invento
         "file_inventory": inventory,
     }
     json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    lines = ["# Sprint 1 Gate Summary", "", "| Gate | Status | Detail |", "|---|---|---|"]
+    lines = [f"# {title}", "", "| Gate | Status | Detail |", "|---|---|---|"]
     for result in gate_results:
         lines.append(f"| {result.name} | {result.status} | {result.detail.replace('|', '/')} |")
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")

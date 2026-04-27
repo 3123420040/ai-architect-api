@@ -26,13 +26,13 @@ run_ci() {
             echo "--- Tool versions ---"
             python --version
             node --version
-            /opt/blender/blender --background --version 2>&1 | head -3
-            ffmpeg -version 2>&1 | head -1
-            ffprobe -version 2>&1 | head -1
+            /opt/blender/blender --background --version 2>&1 || true
+            ffmpeg -version 2>&1 || true
+            ffprobe -version 2>&1 || true
             ktx --version 2>/dev/null || toktx --version 2>/dev/null || echo "KTX CLI not found"
             echo "--- Python packages ---"
-            python -m pip install --break-system-packages -r /workspace/requirements.txt 2>&1 | tail -3
-            python -m pip show usd-core 2>&1 | head -5
+            python -m pip install --break-system-packages -r /workspace/requirements.txt
+            python -m pip show usd-core
             echo "--- Node tools ---"
             npm ci --prefix /workspace/tools/sprint2
             echo "=== Sprint 2 CI ==="

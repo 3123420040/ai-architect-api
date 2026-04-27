@@ -10,11 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
+from app.services.professional_deliverables.drawing_contract import DrawingProject
 from app.services.professional_deliverables.camera_path import build_camera_path
 from app.services.professional_deliverables.golden_fixture import build_golden_townhouse
 from app.services.professional_deliverables.ktx2_encoder import ExternalToolError, discover_ktx_tool
 from app.services.professional_deliverables.scene_builder import build_scene_from_project
-from app.services.professional_deliverables.sprint2_demo import generate_golden_3d_bundle
+from app.services.professional_deliverables.sprint2_demo import generate_golden_3d_bundle, generate_project_3d_bundle
 from app.services.professional_deliverables.usdz_converter import USDZConversionError, export_usdz_from_glb
 from app.services.professional_deliverables.usdz_validators import (
     validate_usdz_material_parity,
@@ -66,16 +67,21 @@ def _clean_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def generate_golden_ar_video_bundle(
-    output_root: Path | None = None,
+def generate_project_ar_video_bundle(
+    project: DrawingProject,
+    output_root: Path,
     *,
     require_external_tools: bool | None = None,
+    project_dir: Path | None = None,
 ) -> Sprint3BundleResult:
     if require_external_tools is None:
         require_external_tools = bool(os.environ.get("CI"))
-    output_root = output_root or (settings.storage_dir / "professional-deliverables")
-    sprint2 = generate_golden_3d_bundle(output_root, require_external_tools=require_external_tools)
-    project = build_golden_townhouse()
+    sprint2 = generate_project_3d_bundle(
+        project,
+        output_root,
+        require_external_tools=require_external_tools,
+        project_dir=project_dir,
+    )
     scene = build_scene_from_project(project)
     project_dir = sprint2.project_dir
     three_d_dir = sprint2.three_d_dir
@@ -229,6 +235,18 @@ def generate_golden_ar_video_bundle(
         gate_summary_json=summary_json,
         gate_summary_md=summary_md,
     )
+
+
+def generate_golden_ar_video_bundle(
+    output_root: Path | None = None,
+    *,
+    require_external_tools: bool | None = None,
+) -> Sprint3BundleResult:
+    if require_external_tools is None:
+        require_external_tools = bool(os.environ.get("CI"))
+    output_root = output_root or (settings.storage_dir / "professional-deliverables")
+    project = build_golden_townhouse()
+    return generate_project_ar_video_bundle(project, output_root, require_external_tools=require_external_tools)
 
 
 def main() -> None:

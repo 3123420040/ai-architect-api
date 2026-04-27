@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
+from app.services.professional_deliverables.drawing_contract import DrawingProject
 from app.services.professional_deliverables.dwg_converter import ODAConverterError, convert_dxf_directory_to_dwg
 from app.services.professional_deliverables.dxf_exporter import write_dxf_sheets
 from app.services.professional_deliverables.golden_fixture import build_golden_townhouse
@@ -68,13 +69,17 @@ def _copy_dwg_outputs(temp_dir: Path, two_d_dir: Path, stems: set[str]) -> tuple
     return tuple(copied)
 
 
-def generate_golden_bundle(output_root: Path | None = None, *, require_dwg: bool | None = None) -> Sprint1BundleResult:
+def generate_project_2d_bundle(
+    project: DrawingProject,
+    output_root: Path,
+    *,
+    require_dwg: bool | None = None,
+    project_dir: Path | None = None,
+) -> Sprint1BundleResult:
     if require_dwg is None:
         require_dwg = bool(os.environ.get("CI"))
-    output_root = output_root or (settings.storage_dir / "professional-deliverables")
-    project = build_golden_townhouse()
     sheets = assemble_sheet_set(project)
-    project_dir = output_root / f"project-{project.project_id}"
+    project_dir = project_dir or (output_root / f"project-{project.project_id}")
     two_d_dir = project_dir / "2d"
     if two_d_dir.exists():
         shutil.rmtree(two_d_dir)
@@ -126,6 +131,14 @@ def generate_golden_bundle(output_root: Path | None = None, *, require_dwg: bool
         gate_summary_json=summary_json,
         gate_summary_md=summary_md,
     )
+
+
+def generate_golden_bundle(output_root: Path | None = None, *, require_dwg: bool | None = None) -> Sprint1BundleResult:
+    if require_dwg is None:
+        require_dwg = bool(os.environ.get("CI"))
+    output_root = output_root or (settings.storage_dir / "professional-deliverables")
+    project = build_golden_townhouse()
+    return generate_project_2d_bundle(project, output_root, require_dwg=require_dwg)
 
 
 def main() -> None:

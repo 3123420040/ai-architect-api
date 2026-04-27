@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Literal
 
 from app.services.professional_deliverables.drawing_contract import DeliverableValidationError
@@ -114,6 +115,37 @@ class SceneContract:
     def material_by_name(self) -> dict[str, MaterialSpec]:
         return {material.name: material for material in self.materials}
 
+    @property
+    def referenced_material_names(self) -> tuple[str, ...]:
+        return tuple(sorted({element.material_name for element in self.elements}))
+
+    @property
+    def expected_extents_cm(self) -> tuple[float, float, float]:
+        min_x = min_y = min_z = float("inf")
+        max_x = max_y = max_z = float("-inf")
+        for element in self.elements:
+            sx, sy, sz = [value * 100.0 for value in element.size_m]
+            cx, cy, cz = [value * 100.0 for value in element.center_m]
+            hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
+            angle = math.radians(element.rotation_z_degrees)
+            c = math.cos(angle)
+            s = math.sin(angle)
+            for x in (-hx, hx):
+                for y in (-hy, hy):
+                    rx = x * c - y * s
+                    ry = x * s + y * c
+                    min_x = min(min_x, cx + rx)
+                    max_x = max(max_x, cx + rx)
+                    min_y = min(min_y, cy + ry)
+                    max_y = max(max_y, cy + ry)
+                    min_z = min(min_z, cz - hz)
+                    max_z = max(max_z, cz + hz)
+        return (max_x - min_x, max_y - min_y, max_z - min_z)
+
+    @property
+    def extents_tolerance_cm(self) -> tuple[float, float, float]:
+        return tuple(max(5.0, value * 0.02) for value in self.expected_extents_cm)
+
     def as_metadata_stub(self, *, ktx_command: str | None = None) -> dict:
         payload = {
             "project_id": self.project_id,
@@ -121,6 +153,11 @@ class SceneContract:
             "lod_summary": self.lod_summary,
             "material_list": [material.as_manifest_material() for material in self.materials],
             "scene_elements": [element.as_metadata() for element in self.elements],
+            "fbx_validation": {
+                "expected_material_names": list(self.referenced_material_names),
+                "expected_extents_cm": [round(value, 3) for value in self.expected_extents_cm],
+                "extents_tolerance_cm": [round(value, 3) for value in self.extents_tolerance_cm],
+            },
             "agent_provenance": {
                 "sprint": "2",
                 "step": "3d-core-formats",

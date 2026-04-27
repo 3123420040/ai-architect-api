@@ -37,7 +37,10 @@ def main() -> None:
     args = parse_args()
     metadata = json.loads(args.metadata_json.read_text(encoding="utf-8"))
     expected_meshes = len(metadata["scene_elements"])
-    expected_materials = {material["name"] for material in metadata["material_list"]}
+    fbx_validation = metadata.get("fbx_validation") or {}
+    expected_materials = set(fbx_validation.get("expected_material_names") or [material["name"] for material in metadata["material_list"]])
+    expected_extents = tuple(float(value) for value in fbx_validation.get("expected_extents_cm", (620.0, 1620.0, 679.0)))
+    extents_tolerance = tuple(float(value) for value in fbx_validation.get("extents_tolerance_cm", (40.0, 40.0, 40.0)))
     issues: list[str] = []
 
     bpy.ops.object.select_all(action="SELECT")
@@ -63,8 +66,14 @@ def main() -> None:
     min_z = min((obj.bound_box[i][2] + obj.location.z) for obj in mesh_objects for i in range(8)) if mesh_objects else 0.0
     max_z = max((obj.bound_box[i][2] + obj.location.z) for obj in mesh_objects for i in range(8)) if mesh_objects else 0.0
     extents = (max_x - min_x, max_y - min_y, max_z - min_z)
-    if not (580 <= extents[0] <= 650 and 1580 <= extents[1] <= 1660 and 630 <= extents[2] <= 710):
-        issues.append(f"units/up-axis check failed, extents={tuple(round(value, 2) for value in extents)} expected centimeters")
+    extents_match = all(abs(actual - expected) <= tolerance for actual, expected, tolerance in zip(extents, expected_extents, extents_tolerance))
+    if not extents_match:
+        issues.append(
+            "units/up-axis check failed, "
+            f"extents={tuple(round(value, 2) for value in extents)} "
+            f"expected={tuple(round(value, 2) for value in expected_extents)}cm "
+            f"tolerance={tuple(round(value, 2) for value in extents_tolerance)}cm"
+        )
 
     uv_issues: list[str] = []
     for obj in mesh_objects:

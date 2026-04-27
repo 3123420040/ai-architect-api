@@ -22,6 +22,7 @@ from app.services.professional_deliverables.usdz_converter import _apply_usd_pre
 from app.services.professional_deliverables.usdz_materials import USD_PREVIEW_INPUTS, build_usdz_material_payloads
 from app.services.professional_deliverables import usdz_texture_payload
 from app.services.professional_deliverables.usdz_validators import validate_usdz_structural_integrity
+from app.services.professional_deliverables.validators import GateResult, write_gate_outputs
 
 
 class DummyKTXTool:
@@ -139,3 +140,16 @@ def test_empty_sprint3_scene_is_rejected_before_delivery() -> None:
 
     with pytest.raises(DeliverableValidationError):
         validate_scene_contract(scene)
+
+
+def test_sprint3_required_skipped_gates_do_not_produce_top_level_pass(tmp_path) -> None:
+    summary_json, _ = write_gate_outputs(
+        tmp_path,
+        [GateResult("USDZ size budget", "skipped", "model.usdz was not produced")],
+        [],
+        basename="sprint3_gate_summary",
+        title="Sprint 3 Gate Summary",
+        skipped_is_partial=True,
+    )
+
+    assert '"status": "partial"' in summary_json.read_text(encoding="utf-8")

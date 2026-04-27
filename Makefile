@@ -1,4 +1,4 @@
-.PHONY: sprint1-demo sprint1-demo-local sprint1-ci sprint2-demo sprint2-demo-local sprint2-ci sprint3-demo sprint3-demo-local sprint3-ci test
+.PHONY: sprint1-demo sprint1-demo-local sprint1-ci sprint2-demo sprint2-demo-local sprint2-ci sprint3-demo sprint3-demo-local sprint3-ci sprint3-ci-linux test
 
 PYTHON ?= $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python; fi)
 
@@ -34,3 +34,6 @@ sprint3-ci:
 
 test:
 	PYTHONPATH=. $(PYTHON) -m pytest
+
+sprint3-ci-linux:
+	bash tools/sprint3/run-local-linux-parity.sh

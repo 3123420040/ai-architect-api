@@ -1,5 +1,22 @@
 # Sprint 3 Render and USDZ Tooling
 
+## Local Linux Parity Runner
+
+Run the local Sprint 2 + Sprint 3 acceptance path from the API repo root:
+
+```bash
+make sprint3-ci-linux
+```
+
+or directly:
+
+```bash
+tools/sprint3/run-local-linux-parity.sh
+```
+
+The runner is documented in `tools/sprint3/local-linux-parity/README.md`. It builds an Ubuntu-based `linux/amd64` Docker image with Python 3.12, Node 22, Blender 4.5.1, KTX-Software 4.4.2, FFmpeg/ffprobe, and `usd-core==26.5`, then runs `npm ci --prefix tools/sprint2`, `make sprint2-ci`, and `make sprint3-ci` with the repo mounted at `/workspace`.
+
+
 ## CI Fast Profile
 
 `CI_FAST_4K` is the GitHub Actions render profile. It exists to verify the render pipeline and video gates on CPU-only `ubuntu-latest`.

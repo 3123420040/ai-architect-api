@@ -217,7 +217,7 @@ def generate_golden_ar_video_bundle(
         inventory,
         basename="sprint3_gate_summary",
         title="Sprint 3 Gate Summary",
-        skipped_is_partial=False,
+        skipped_is_partial=True,
     )
     return Sprint3BundleResult(
         project_dir=project_dir,

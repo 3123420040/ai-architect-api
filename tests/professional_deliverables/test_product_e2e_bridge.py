@@ -251,10 +251,28 @@ def _patch_task_generators(monkeypatch, root: Path, *, missing_mp4: bool = False
         status = "skipped" if sprint3_skipped else "pass"
         return SimpleNamespace(gate_summary_json=s3_json, gate_summary_md=s3_md, gate_results=(GateResult("Video", status, "ok"),))
 
+    def sprint4_derivatives(bundle_root):
+        if not (bundle_root / "video" / "master_4k.mp4").exists():
+            raise RuntimeError("Missing required master video: video/master_4k.mp4")
+        return {
+            "reel": _touch(bundle_root / "video" / "reel_9x16_1080p.mp4"),
+            "hero_still": _touch(bundle_root / "derivatives" / "hero_still_4k.png"),
+            "gif_preview": _touch(bundle_root / "derivatives" / "preview.gif"),
+        }
+
+    def sprint4_manifest(bundle_root, **_kwargs):
+        return _touch(bundle_root / "manifest.json")
+
+    def sprint4_gates(bundle_root):
+        return [GateResult("Sprint 4", "pass", "ok")], _touch(bundle_root / "sprint4_gate_summary.json"), _touch(bundle_root / "sprint4_gate_summary.md")
+
     monkeypatch.setattr("app.tasks.professional_deliverables.output_root_for", lambda _project_id, _version_id: root)
     monkeypatch.setattr("app.tasks.professional_deliverables.generate_project_2d_bundle", two_d)
     monkeypatch.setattr("app.tasks.professional_deliverables.generate_project_3d_bundle", three_d)
     monkeypatch.setattr("app.tasks.professional_deliverables.generate_project_ar_video_bundle", ar_video)
+    monkeypatch.setattr("app.tasks.professional_deliverables.derive_sprint4_video_outputs", sprint4_derivatives)
+    monkeypatch.setattr("app.tasks.professional_deliverables.build_manifest", sprint4_manifest)
+    monkeypatch.setattr("app.tasks.professional_deliverables.run_sprint4_gates", sprint4_gates)
 
 
 def test_product_task_succeeds_with_required_artifacts_and_assets(client, session_payload, monkeypatch, tmp_path):

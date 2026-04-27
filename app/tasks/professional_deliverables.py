@@ -7,6 +7,7 @@ from app.db import SessionLocal
 from app.models import DesignVersion, ProfessionalDeliverableBundle, ProfessionalDeliverableJob, Project
 from app.services.professional_deliverables.demo import generate_golden_bundle, generate_project_2d_bundle
 from app.services.professional_deliverables.geometry_adapter import geometry_to_drawing_project
+from app.services.professional_deliverables.manifest_builder import build_manifest
 from app.services.professional_deliverables.orchestrator import (
     mark_job_failed,
     mark_job_stage,
@@ -16,6 +17,8 @@ from app.services.professional_deliverables.orchestrator import (
 )
 from app.services.professional_deliverables.sprint3_demo import generate_golden_ar_video_bundle, generate_project_ar_video_bundle
 from app.services.professional_deliverables.sprint2_demo import generate_golden_3d_bundle, generate_project_3d_bundle
+from app.services.professional_deliverables.sprint4_validators import run_sprint4_gates
+from app.services.professional_deliverables.video_derivatives import derive_sprint4_video_outputs
 from app.tasks.worker import celery_app
 
 
@@ -25,8 +28,14 @@ REQUIRED_PRODUCT_ARTIFACTS = (
     Path("3d/model.fbx"),
     Path("3d/model.usdz"),
     Path("video/master_4k.mp4"),
+    Path("video/reel_9x16_1080p.mp4"),
+    Path("derivatives/hero_still_4k.png"),
+    Path("derivatives/preview.gif"),
+    Path("manifest.json"),
     Path("sprint3_gate_summary.json"),
     Path("sprint3_gate_summary.md"),
+    Path("sprint4_gate_summary.json"),
+    Path("sprint4_gate_summary.md"),
 )
 
 
@@ -47,7 +56,7 @@ def _is_dwg_oda_skip(gate: Any) -> bool:
     return "dwg" in text and ("oda" in text or "opendesign" in text or "converter" in text)
 
 
-def _validate_product_outputs(root: Path, sprint1: Any, sprint2: Any, sprint3: Any) -> tuple[str, list[str]]:
+def _validate_product_outputs(root: Path, sprint1: Any, sprint2: Any, sprint3: Any, sprint4_gates: list[Any]) -> tuple[str, list[str]]:
     missing = [str(relative) for relative in REQUIRED_PRODUCT_ARTIFACTS if not (root / relative).exists()]
     dxf_paths = list(getattr(sprint1, "dxf_paths", []) or [])
     if not any(path.exists() for path in dxf_paths):
@@ -76,6 +85,12 @@ def _validate_product_outputs(root: Path, sprint1: Any, sprint2: Any, sprint3: A
                     continue
                 raise RuntimeError(f"{sprint_name} gate skipped: {_gate_name(gate)} - {_gate_detail(gate)}")
 
+    for gate in sprint4_gates:
+        status = _gate_status(gate)
+        if status == "fail":
+            raise RuntimeError(f"Sprint 4 gate failed: {_gate_name(gate)} - {_gate_detail(gate)}")
+        if status == "skipped":
+            raise RuntimeError(f"Sprint 4 gate skipped: {_gate_name(gate)} - {_gate_detail(gate)}")
 
     return ("partial", degraded_reasons) if degraded_reasons else ("pass", [])
 
@@ -170,10 +185,34 @@ def run_professional_deliverable_bundle_task(job_id: str) -> dict:
                 project_dir=root,
             )
 
-            mark_job_stage(db, job, stage="validate", progress=95, bundle=bundle)
+            mark_job_stage(db, job, stage="derive_reel", progress=90, bundle=bundle)
             db.commit()
 
-            quality_status, degraded_reasons = _validate_product_outputs(root, sprint1, sprint2, sprint3)
+            sprint4_outputs = derive_sprint4_video_outputs(root)
+
+            mark_job_stage(db, job, stage="build_manifest", progress=97, bundle=bundle)
+            db.commit()
+
+            manifest_path = build_manifest(
+                root,
+                project_id=project.id,
+                source_brief=project.brief_json,
+            )
+            sprint4_gates, sprint4_summary_json, sprint4_summary_md = run_sprint4_gates(root)
+
+            mark_job_stage(db, job, stage="validate", progress=99, bundle=bundle)
+            db.commit()
+
+            quality_status, degraded_reasons = _validate_product_outputs(root, sprint1, sprint2, sprint3, sprint4_gates)
+            if degraded_reasons:
+                manifest_path = build_manifest(
+                    root,
+                    project_id=project.id,
+                    source_brief=project.brief_json,
+                    degraded_reasons=degraded_reasons,
+                )
+                sprint4_gates, sprint4_summary_json, sprint4_summary_md = run_sprint4_gates(root)
+                quality_status, degraded_reasons = _validate_product_outputs(root, sprint1, sprint2, sprint3, sprint4_gates)
 
             artifact_mappings = [
                 (sprint1.pdf_path, "2d", "pdf", "application/pdf"),
@@ -181,6 +220,12 @@ def run_professional_deliverable_bundle_task(job_id: str) -> dict:
                 (sprint1.gate_summary_md, "gate_summary", "sprint1_gate_summary_md", "text/markdown"),
                 (sprint3.gate_summary_json, "gate_summary", "gate_summary_json", "application/json"),
                 (sprint3.gate_summary_md, "gate_summary", "gate_summary_md", "text/markdown"),
+                (sprint4_outputs["reel"], "video", "marketing_reel", "video/mp4"),
+                (sprint4_outputs["hero_still"], "derivative", "hero_still", "image/png"),
+                (sprint4_outputs["gif_preview"], "derivative", "gif_preview", "image/gif"),
+                (manifest_path, "manifest", "manifest", "application/json"),
+                (sprint4_summary_json, "gate_summary", "sprint4_gate_summary_json", "application/json"),
+                (sprint4_summary_md, "gate_summary", "sprint4_gate_summary_md", "text/markdown"),
             ]
             for dxf_path in sprint1.dxf_paths:
                 artifact_mappings.append((dxf_path, "2d", "dxf", "application/dxf"))

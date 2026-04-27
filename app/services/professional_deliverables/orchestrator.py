@@ -126,7 +126,11 @@ STAGE_PROGRESS = {
     "export_3d": 50,
     "export_usdz": 65,
     "render_video": 85,
-    "validate": 95,
+    "derive_reel": 90,
+    "derive_derivatives": 94,
+    "build_manifest": 97,
+    "archive_bundle": 99,
+    "validate": 99,
     "ready": 100,
 }
 

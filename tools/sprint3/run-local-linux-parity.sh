@@ -12,6 +12,32 @@ build_image() {
     echo "=== Image built ==="
 }
 
+run_sprint4_ci() {
+    echo "=== Running Sprint 4 CI inside parity container ==="
+    docker run --platform linux/amd64 --rm \
+        -v "$REPO_ROOT:/workspace:cached" \
+        -e PYTHONPATH=/workspace \
+        -e BLENDER_BIN=/opt/blender/blender \
+        -e KTX_BIN=/usr/bin/ktx \
+        -e GLTF_TRANSFORM_BIN=/workspace/tools/sprint2/node_modules/.bin/gltf-transform \
+        "${IMAGE_NAME}:${IMAGE_TAG}" \
+        bash -c '
+            set -eo pipefail
+            echo "--- Tool versions ---"
+            python --version
+            node --version
+            ffmpeg -version 2>&1
+            ffprobe -version 2>&1
+            echo "--- Python packages ---"
+            python -m pip install --break-system-packages -r /workspace/requirements.txt
+            echo "=== Sprint 4 derivative/manifest/gate tests ==="
+            PYTHONPATH=/workspace python -m pytest /workspace/tests/professional_deliverables/test_sprint4_final_bundle.py
+            echo "=== Sprint 4 product bridge tests ==="
+            PYTHONPATH=/workspace python -m pytest /workspace/tests/professional_deliverables/test_product_e2e_bridge.py
+            echo "=== Done ==="
+        '
+}
+
 run_ci() {
     echo "=== Running Sprint 2 + Sprint 3 CI inside parity container ==="
     docker run --platform linux/amd64 --rm \
@@ -54,6 +80,13 @@ case "${1:-run}" in
     run-only)
         run_ci
         ;;
+    sprint4)
+        build_image
+        run_sprint4_ci
+        ;;
+    sprint4-run-only)
+        run_sprint4_ci
+        ;;
     shell)
         docker run --platform linux/amd64 --rm -it \
             -v "$REPO_ROOT:/workspace:cached" \
@@ -64,7 +97,7 @@ case "${1:-run}" in
             bash
         ;;
     *)
-        echo "Usage: $0 {build|run|run-only|shell}" >&2
+        echo "Usage: $0 {build|run|run-only|sprint4|sprint4-run-only|shell}" >&2
         exit 1
         ;;
 esac

@@ -6,7 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN grep -v '^usd-core==' requirements.txt > /tmp/runtime-requirements.txt \
+    && pip install --no-cache-dir -r /tmp/runtime-requirements.txt
 
 COPY app ./app
 COPY alembic ./alembic

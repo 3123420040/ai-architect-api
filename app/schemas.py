@@ -248,3 +248,38 @@ class UploadPresignResponse(BaseModel):
     upload_url: str
     download_url: str
     expires_in: int
+
+
+class ProfessionalDeliverableJobCreateRequest(BaseModel):
+    pass
+
+
+class ProfessionalDeliverableJobOut(BaseModel):
+    job_id: str
+    bundle_id: str
+    status: str
+    stage: str
+    progress_percent: int
+    attempt_count: int = 0
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class ProfessionalDeliverableAssetSummary(BaseModel):
+    url: str
+    asset_type: str | None = None
+    asset_role: str | None = None
+    content_type: str | None = None
+    byte_size: int = 0
+
+
+class ProfessionalDeliverableBundleOut(BaseModel):
+    bundle_id: str
+    version_id: str
+    status: str
+    quality_status: str
+    is_degraded: bool = False
+    degraded_reasons: list[str] = Field(default_factory=list)
+    assets: list[ProfessionalDeliverableAssetSummary] = Field(default_factory=list)
+    current_job: ProfessionalDeliverableJobOut | None = None
+    updated_at: datetime

@@ -36,3 +36,4 @@ def queue_ping(payload: dict | None = None):
 
 
 from app.tasks import presentation_3d as _presentation_3d_tasks  # noqa: E402,F401
+from app.tasks import professional_deliverables as _professional_deliverables_tasks  # noqa: E402,F401

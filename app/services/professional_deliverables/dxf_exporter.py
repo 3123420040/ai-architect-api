@@ -1,0 +1,178 @@
+from __future__ import annotations
+
+import math
+from pathlib import Path
+
+import ezdxf
+
+from app.services.professional_deliverables.aia_layers import apply_aia_layers
+from app.services.professional_deliverables.drawing_contract import DrawingProject, Fixture, Opening, SheetSpec
+
+
+def _new_doc(project: DrawingProject, sheet: SheetSpec):
+    doc = ezdxf.new("R2018", setup=True)
+    doc.header["$INSUNITS"] = 6  # meters
+    doc.header["$DWGCODEPAGE"] = "UTF-8"
+    apply_aia_layers(doc)
+    return doc
+
+
+def _add_text(msp, text: str, point: tuple[float, float], *, height: float = 0.22, layer: str = "A-ANNO-TEXT") -> None:
+    entity = msp.add_text(text, dxfattribs={"layer": layer, "height": height})
+    entity.dxf.insert = point
+
+
+def _add_polyline(msp, points, *, layer: str, closed: bool = False) -> None:
+    msp.add_lwpolyline(points, close=closed, dxfattribs={"layer": layer})
+
+
+def _draw_title_note(msp, project: DrawingProject, sheet: SheetSpec) -> None:
+    _add_polyline(msp, [(-1.4, -2.0), (6.4, -2.0), (6.4, -0.8), (-1.4, -0.8)], layer="A-ANNO-TTLB", closed=True)
+    _add_text(msp, project.project_name, (-1.2, -1.2), height=0.18, layer="A-ANNO-TTLB")
+    _add_text(msp, f"{sheet.number} - {sheet.title}", (-1.2, -1.55), height=0.16, layer="A-ANNO-TTLB")
+    _add_text(msp, f"Tỷ lệ {sheet.scale} | Ngày {project.issue_date.isoformat()} | Ô dấu KTS", (2.4, -1.55), height=0.14, layer="A-ANNO-TTLB")
+
+
+def _draw_dimensions(msp, project: DrawingProject, *, x_offset: float = 0.0, y_offset: float = 0.0) -> None:
+    width = project.lot_width_m
+    depth = project.lot_depth_m
+    _add_polyline(msp, [(x_offset, y_offset - 0.45), (x_offset + width, y_offset - 0.45)], layer="A-ANNO-DIMS")
+    _add_text(msp, "5.00 m", (x_offset + width / 2 - 0.35, y_offset - 0.75), height=0.18, layer="A-ANNO-DIMS")
+    _add_polyline(msp, [(x_offset - 0.45, y_offset), (x_offset - 0.45, y_offset + depth)], layer="A-ANNO-DIMS")
+    _add_text(msp, "15.00 m", (x_offset - 1.15, y_offset + depth / 2), height=0.18, layer="A-ANNO-DIMS")
+
+
+def _draw_north_arrow(msp, base: tuple[float, float]) -> None:
+    x, y = base
+    _add_polyline(msp, [(x, y), (x + 0.25, y + 0.8), (x + 0.5, y), (x, y)], layer="A-ANNO-NORTH")
+    _add_text(msp, "B", (x + 0.18, y + 0.95), height=0.2, layer="A-ANNO-NORTH")
+
+
+def _fixture_layer(fixture: Fixture) -> str:
+    return {
+        "furniture": "A-FURN",
+        "plumbing": "P-FIXT",
+        "light": "E-LITE",
+        "plant": "L-PLNT",
+    }[fixture.kind]
+
+
+def _draw_fixture(msp, fixture: Fixture) -> None:
+    x, y = fixture.center
+    w, h = fixture.size
+    layer = _fixture_layer(fixture)
+    if fixture.kind == "light":
+        msp.add_circle((x, y), w / 2, dxfattribs={"layer": layer})
+    elif fixture.kind == "plant":
+        msp.add_circle((x, y), w / 2, dxfattribs={"layer": layer})
+        _add_polyline(msp, [(x - w / 2, y), (x + w / 2, y), (x, y - h / 2), (x, y + h / 2)], layer=layer)
+    else:
+        _add_polyline(msp, [(x - w / 2, y - h / 2), (x + w / 2, y - h / 2), (x + w / 2, y + h / 2), (x - w / 2, y + h / 2)], layer=layer, closed=True)
+    _add_text(msp, fixture.label, (x - w / 2, y + h / 2 + 0.12), height=0.12, layer="A-ANNO-TEXT")
+
+
+def _draw_opening(msp, opening: Opening) -> None:
+    layer = "A-DOOR" if opening.kind == "door" else "A-GLAZ"
+    _add_polyline(msp, [opening.start, opening.end], layer=layer)
+    if opening.kind == "door":
+        sx, sy = opening.start
+        ex, ey = opening.end
+        radius = math.dist(opening.start, opening.end)
+        if abs(sy - ey) < 0.01:
+            start_angle = 0 if ex > sx else 180
+            end_angle = 90 if ex > sx else 90
+            msp.add_arc((sx, sy), radius, start_angle, end_angle, dxfattribs={"layer": "A-DOOR"})
+        else:
+            msp.add_arc((sx, sy), radius, 270, 360, dxfattribs={"layer": "A-DOOR"})
+        _add_text(msp, opening.label, ((sx + ex) / 2, (sy + ey) / 2 + 0.16), height=0.12, layer="A-DOOR-IDEN")
+    else:
+        _add_text(msp, opening.label, ((opening.start[0] + opening.end[0]) / 2, (opening.start[1] + opening.end[1]) / 2 + 0.16), height=0.12, layer="A-ANNO-TEXT")
+
+
+def _draw_floorplan(msp, project: DrawingProject, floor: int) -> None:
+    _add_polyline(msp, [(0, 0), (project.lot_width_m, 0), (project.lot_width_m, project.lot_depth_m), (0, project.lot_depth_m)], layer="A-WALL", closed=True)
+    for wall in project.walls_for_floor(floor):
+        _add_polyline(msp, [wall.start, wall.end], layer=wall.layer)
+    for room in project.rooms_for_floor(floor):
+        _add_polyline(msp, room.polygon, layer="A-AREA", closed=True)
+        _add_text(msp, room.name, room.center, height=0.18, layer="A-AREA-IDEN")
+    for opening in project.openings_for_floor(floor):
+        _draw_opening(msp, opening)
+    for fixture in project.fixtures_for_floor(floor):
+        _draw_fixture(msp, fixture)
+    for x, y in ((0.25, 0.25), (4.75, 0.25), (0.25, 14.75), (4.75, 14.75)):
+        _add_polyline(msp, [(x - 0.12, y - 0.12), (x + 0.12, y - 0.12), (x + 0.12, y + 0.12), (x - 0.12, y + 0.12)], layer="S-COLS", closed=True)
+    _add_polyline(msp, [(0.1, 8.25), (2.0, 10.75)], layer="A-ANNO-NPLT")
+    _draw_dimensions(msp, project)
+    _draw_north_arrow(msp, (5.65, 13.5))
+
+
+def _draw_site(msp, project: DrawingProject) -> None:
+    _add_polyline(msp, [(-0.5, -1.0), (5.5, -1.0), (5.5, 16.0), (-0.5, 16.0)], layer="L-SITE", closed=True)
+    _add_polyline(msp, project.roof_outline, layer="A-ROOF", closed=True)
+    _add_polyline(msp, [(0, 0), (5, 0), (5, 15), (0, 15)], layer="A-WALL", closed=True)
+    for x, y in ((0.5, -0.5), (4.5, -0.5), (0.5, 15.5), (4.5, 15.5)):
+        msp.add_circle((x, y), 0.22, dxfattribs={"layer": "L-PLNT"})
+    _add_text(msp, "Ranh đất 5 m x 15 m", (0.3, 15.25), height=0.18, layer="A-ANNO-TEXT")
+    _draw_dimensions(msp, project)
+    _draw_north_arrow(msp, (5.85, 13.8))
+
+
+def _draw_elevations(msp, project: DrawingProject) -> None:
+    height = project.storeys * 3.3 + 0.8
+    specs = (
+        ("Bắc", 0.0, 0.0, project.lot_width_m),
+        ("Nam", 8.0, 0.0, project.lot_width_m),
+        ("Đông", 0.0, 5.8, project.lot_depth_m),
+        ("Tây", 8.0, 5.8, project.lot_depth_m),
+    )
+    for label, ox, oy, width in specs:
+        _add_polyline(msp, [(ox, oy), (ox + width, oy), (ox + width, oy + height), (ox, oy + height)], layer="A-ELEV-OTLN", closed=True)
+        for level in range(1, project.storeys + 1):
+            _add_polyline(msp, [(ox, oy + level * 3.3), (ox + width, oy + level * 3.3)], layer="S-BEAM")
+        _add_polyline(msp, [(ox - 0.15, oy - 0.25), (ox + width + 0.15, oy - 0.25)], layer="S-FNDN")
+        _add_polyline(msp, [(ox + width * 0.2, oy + 1.0), (ox + width * 0.4, oy + 1.0), (ox + width * 0.4, oy + 2.3), (ox + width * 0.2, oy + 2.3)], layer="A-GLAZ", closed=True)
+        _add_polyline(msp, [(ox + width * 0.62, oy + 4.2), (ox + width * 0.82, oy + 4.2), (ox + width * 0.82, oy + 5.5), (ox + width * 0.62, oy + 5.5)], layer="A-GLAZ", closed=True)
+        _add_text(msp, f"Mặt đứng {label}", (ox, oy + height + 0.28), height=0.18, layer="A-ANNO-TEXT")
+
+
+def _draw_sections(msp, project: DrawingProject) -> None:
+    height = project.storeys * 3.3 + 0.8
+    for label, ox, width in (("Mặt cắt ngang", 0.0, project.lot_width_m), ("Mặt cắt dọc", 8.0, project.lot_depth_m)):
+        _add_polyline(msp, [(ox, 0), (ox + width, 0), (ox + width, height), (ox, height)], layer="A-SECT-MCUT", closed=True)
+        for level in range(1, project.storeys + 1):
+            _add_polyline(msp, [(ox, level * 3.3), (ox + width, level * 3.3)], layer="S-BEAM")
+        _add_polyline(msp, [(ox + 0.5, 0.2), (ox + 2.2, 3.1), (ox + 0.5, 3.1), (ox + 2.2, 6.4)], layer="A-SECT-OTLN")
+        _add_polyline(msp, [(ox - 0.15, -0.25), (ox + width + 0.15, -0.25)], layer="S-FNDN")
+        _add_text(msp, label, (ox, height + 0.28), height=0.18, layer="A-ANNO-TEXT")
+
+
+def build_dxf_document(project: DrawingProject, sheet: SheetSpec):
+    doc = _new_doc(project, sheet)
+    msp = doc.modelspace()
+    if sheet.kind == "site":
+        _draw_site(msp, project)
+    elif sheet.kind == "floorplan":
+        if sheet.floor is None:
+            raise ValueError("floorplan sheet requires floor")
+        _draw_floorplan(msp, project, sheet.floor)
+    elif sheet.kind == "elevations":
+        _draw_elevations(msp, project)
+    elif sheet.kind == "sections":
+        _draw_sections(msp, project)
+    else:
+        raise ValueError(f"Unsupported sheet kind {sheet.kind}")
+    _draw_title_note(msp, project, sheet)
+    return doc
+
+
+def write_dxf_sheet(project: DrawingProject, sheet: SheetSpec, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / sheet.dxf_filename
+    doc = build_dxf_document(project, sheet)
+    doc.saveas(path)
+    return path
+
+
+def write_dxf_sheets(project: DrawingProject, sheets: tuple[SheetSpec, ...], output_dir: Path) -> list[Path]:
+    return [write_dxf_sheet(project, sheet, output_dir) for sheet in sheets]

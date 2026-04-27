@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from pathlib import Path
 
 import bpy
@@ -82,7 +83,8 @@ def main() -> None:
     parser.add_argument("--camera-path-json", required=True)
     parser.add_argument("--stills-dir", required=True)
     parser.add_argument("--report-json", required=True)
-    args = parser.parse_args()
+    argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
+    args = parser.parse_args(argv)
 
     _configure_scene()
     _safe_import_glb(args.glb)

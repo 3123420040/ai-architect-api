@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import bpy
@@ -78,7 +79,8 @@ def main() -> None:
     parser.add_argument("--usd", required=True)
     parser.add_argument("--report-json", required=True)
     parser.add_argument("--target-triangles", type=int, default=200000)
-    args = parser.parse_args()
+    argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
+    args = parser.parse_args(argv)
 
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()

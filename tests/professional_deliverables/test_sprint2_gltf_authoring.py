@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import json
 
-from app.services.professional_deliverables.gltf_authoring import read_glb_json, write_ktx_glb, write_source_gltf
+from app.services.professional_deliverables.gltf_authoring import (
+    read_glb_json,
+    write_blender_preview_glb,
+    write_ktx_glb,
+    write_source_gltf,
+)
 from app.services.professional_deliverables.golden_fixture import build_golden_townhouse
 from app.services.professional_deliverables.scene_builder import build_scene_from_project
 from app.services.professional_deliverables.scene_contract import TEXTURE_SLOTS
@@ -60,3 +65,23 @@ def test_ktx_glb_embeds_basisu_textures_without_spec_gloss(tmp_path) -> None:
     assert payload["images"][0]["mimeType"] == "image/ktx2"
     assert "bufferView" in payload["images"][0]
     assert all(view["buffer"] == 0 for view in payload["bufferViews"])
+
+
+def test_blender_preview_glb_removes_basisu_textures_without_replacing_geometry(tmp_path) -> None:
+    scene = build_scene_from_project(build_golden_townhouse())
+    textures_dir = tmp_path / "textures"
+    textures_dir.mkdir()
+    for material in scene.materials:
+        for slot in TEXTURE_SLOTS:
+            (textures_dir / material.texture_filename(slot, extension="ktx2")).write_bytes(b"\xabKTX 20\xbb\r\n\x1a\n")
+
+    source_glb = write_ktx_glb(scene, textures_dir, tmp_path / "model.glb")
+    preview_glb = write_blender_preview_glb(source_glb, scene, tmp_path / "blender-preview.glb")
+    payload = read_glb_json(preview_glb)
+
+    assert "KHR_texture_basisu" not in payload.get("extensionsUsed", [])
+    assert "KHR_texture_basisu" not in payload.get("extensionsRequired", [])
+    assert "images" not in payload
+    assert "textures" not in payload
+    assert len(payload["meshes"]) == len(scene.elements)
+    assert all("baseColorTexture" not in material["pbrMetallicRoughness"] for material in payload["materials"])

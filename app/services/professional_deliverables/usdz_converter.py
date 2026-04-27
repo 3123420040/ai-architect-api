@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.services.professional_deliverables.blender_runner import BlenderToolError, run_blender_script
-from app.services.professional_deliverables.gltf_authoring import read_glb_json
+from app.services.professional_deliverables.gltf_authoring import read_glb_json, write_blender_preview_glb
 from app.services.professional_deliverables.ktx2_encoder import ExternalToolError, KTXTool
 from app.services.professional_deliverables.scene_contract import SceneContract
 from app.services.professional_deliverables.usdz_budget import (
@@ -211,6 +211,9 @@ def export_usdz_from_glb(
             max_resolution_px=AR_QUICK_LOOK_LITE_TEXTURE_PX,
         )
 
+        blender_glb_path = temp_dir / "blender-readable-source.glb"
+        write_blender_preview_glb(glb_path, scene, blender_glb_path)
+
         stage_path = package_root / "model_lite.usd"
         export_report_path = three_d_dir / "usdz-export-report.json"
         try:
@@ -218,7 +221,7 @@ def export_usdz_from_glb(
                 EXPORT_USD_SCRIPT,
                 [
                     "--glb",
-                    str(glb_path),
+                    str(blender_glb_path),
                     "--usd",
                     str(stage_path),
                     "--report-json",

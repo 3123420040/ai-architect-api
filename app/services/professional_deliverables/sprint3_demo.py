@@ -131,6 +131,7 @@ def generate_golden_ar_video_bundle(
         try:
             rendered = render_master_video(
                 sprint2.glb_path,
+                scene,
                 camera_path,
                 video_dir,
                 temp_dir / "first",
@@ -144,6 +145,7 @@ def generate_golden_ar_video_bundle(
                 second_video_dir = temp_dir / "second-video"
                 second_video = render_master_video(
                     sprint2.glb_path,
+                    scene,
                     camera_path,
                     second_video_dir,
                     temp_dir / "second",

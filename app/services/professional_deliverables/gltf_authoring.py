@@ -620,6 +620,54 @@ def embed_ktx_textures_in_glb(source_glb: Path, scene: SceneContract, textures_d
     return output_glb
 
 
+def write_blender_preview_glb(source_glb: Path, scene: SceneContract, output_glb: Path) -> Path:
+    """Write a Blender-readable GLB derived from the Sprint 2 GLB.
+
+    Blender 4.5.1's glTF add-on does not import KHR_texture_basisu. Sprint 3
+    only needs mesh geometry from model.glb because USDZ material payloads are
+    translated separately from the Sprint 2 KTX2 texture inventory.
+    """
+    payload, bin_chunk = _read_glb(source_glb)
+    materials_by_name = scene.material_by_name
+    sanitized_materials = []
+    for material_payload in payload.get("materials", []):
+        material = materials_by_name.get(material_payload.get("name"))
+        if material is None:
+            sanitized_materials.append({"name": material_payload.get("name", "MAT_unknown")})
+            continue
+        sanitized_materials.append(
+            {
+                "name": material.name,
+                "pbrMetallicRoughness": {
+                    "baseColorFactor": [
+                        material.channels.base_color_rgba[0] / 255.0,
+                        material.channels.base_color_rgba[1] / 255.0,
+                        material.channels.base_color_rgba[2] / 255.0,
+                        material.channels.base_color_rgba[3] / 255.0,
+                    ],
+                    "metallicFactor": material.channels.metallic / 255.0,
+                    "roughnessFactor": material.channels.roughness / 255.0,
+                },
+                "extras": material_payload.get("extras", {}),
+            }
+        )
+    payload["materials"] = sanitized_materials
+    for key in ("textures", "images", "samplers"):
+        payload.pop(key, None)
+    for key in ("extensionsUsed", "extensionsRequired"):
+        values = [value for value in payload.get(key, []) if value != "KHR_texture_basisu"]
+        if values:
+            payload[key] = values
+        else:
+            payload.pop(key, None)
+    payload.setdefault("asset", {})["generator"] = "AI Architect Sprint 3 Blender preview GLB derived from model.glb"
+    buffer = bytearray(bin_chunk)
+    _align4(buffer)
+    payload["buffers"] = [{"byteLength": len(buffer)}]
+    _write_glb(output_glb, payload, buffer)
+    return output_glb
+
+
 def read_glb_json(path: Path) -> dict:
     payload, _ = _read_glb(path)
     return payload

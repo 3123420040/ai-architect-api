@@ -9,6 +9,8 @@ from pathlib import Path
 
 from app.services.professional_deliverables.blender_runner import BlenderToolError, run_blender_script
 from app.services.professional_deliverables.camera_path import CameraPath
+from app.services.professional_deliverables.gltf_authoring import write_blender_preview_glb
+from app.services.professional_deliverables.scene_contract import SceneContract
 
 RENDER_SCRIPT = Path(__file__).resolve().parent / "blender_scripts" / "render_master_video.py"
 
@@ -127,6 +129,7 @@ def _encode_stills(stills_report: Path, output_mp4: Path, profile: VideoRenderPr
 
 def render_master_video(
     glb_path: Path,
+    scene: SceneContract,
     camera_path: CameraPath,
     video_dir: Path,
     work_dir: Path,
@@ -137,6 +140,9 @@ def render_master_video(
     if not glb_path.exists():
         raise VideoRenderError(f"Source GLB not found: {glb_path}")
     video_dir.mkdir(parents=True, exist_ok=True)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    blender_glb_path = work_dir / "blender-readable-source.glb"
+    write_blender_preview_glb(glb_path, scene, blender_glb_path)
     camera_path_json = video_dir / "camera_path.json"
     camera_path_json.write_text(json.dumps(camera_path.as_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
     stills_dir = work_dir / f"stills-{profile.name.lower()}"
@@ -146,7 +152,7 @@ def render_master_video(
             RENDER_SCRIPT,
             [
                 "--glb",
-                str(glb_path),
+                str(blender_glb_path),
                 "--camera-path-json",
                 str(camera_path_json),
                 "--stills-dir",

@@ -55,6 +55,21 @@ def _remove_existing_material_prims(stage, UsdShade) -> None:
         stage.RemovePrim(path)
 
 
+def _remove_unsupported_arkit_prims(stage) -> None:
+    unsupported_type_names = {
+        "Camera",
+        "CylinderLight",
+        "DiskLight",
+        "DistantLight",
+        "DomeLight",
+        "RectLight",
+        "SphereLight",
+    }
+    paths = [prim.GetPath() for prim in stage.Traverse() if prim.GetTypeName() in unsupported_type_names]
+    for path in sorted(paths, key=lambda item: len(str(item)), reverse=True):
+        stage.RemovePrim(path)
+
+
 def _ensure_default_prim(stage, UsdGeom) -> None:
     # ARKit's USDZ compliance profile expects Y-up stage metadata even though
     # the source Sprint 2 scene contract is authored with Z as the vertical axis.
@@ -86,6 +101,7 @@ def _apply_usd_preview_materials(stage_path: Path, scene: SceneContract, texture
     if stage is None:
         raise USDZConversionError(f"Unable to open USD stage {stage_path}")
     _ensure_default_prim(stage, UsdGeom)
+    _remove_unsupported_arkit_prims(stage)
     _remove_existing_material_prims(stage, UsdShade)
 
     material_payloads = build_usdz_material_payloads(scene.materials)

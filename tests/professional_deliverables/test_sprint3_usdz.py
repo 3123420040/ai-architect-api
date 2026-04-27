@@ -87,6 +87,7 @@ def test_usdz_structural_integrity_accepts_openusd_localized_textures(tmp_path) 
     Usd = pytest.importorskip("pxr.Usd")
     UsdGeom = pytest.importorskip("pxr.UsdGeom")
     Gf = pytest.importorskip("pxr.Gf")
+    UsdLux = pytest.importorskip("pxr.UsdLux")
     assert pxr
     material = GOLDEN_MATERIALS[0]
     scene = SceneContract(
@@ -117,6 +118,7 @@ def test_usdz_structural_integrity_accepts_openusd_localized_textures(tmp_path) 
     UsdGeom.SetStageMetersPerUnit(stage, 1.0)
     world = UsdGeom.Xform.Define(stage, "/World")
     stage.SetDefaultPrim(world.GetPrim())
+    UsdLux.DomeLight.Define(stage, "/World/env_light")
     mesh = UsdGeom.Mesh.Define(stage, "/World/Wall")
     mesh.CreatePointsAttr([Gf.Vec3f(0, 0, 0), Gf.Vec3f(1, 0, 0), Gf.Vec3f(0, 1, 0)])
     mesh.CreateFaceVertexCountsAttr([3])

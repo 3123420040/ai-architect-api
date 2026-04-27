@@ -30,6 +30,7 @@ from app.services.professional_deliverables.model_validators import (
     validate_usdz_size_budget_skipped,
 )
 from app.services.professional_deliverables.scene_builder import build_scene_from_project
+from app.services.professional_deliverables.scene_contract import SceneContract
 from app.services.professional_deliverables.texture_authoring import write_source_textures
 from app.services.professional_deliverables.validators import GateResult, build_file_inventory, write_gate_outputs
 
@@ -79,10 +80,11 @@ def generate_project_3d_bundle(
     *,
     require_external_tools: bool | None = None,
     project_dir: Path | None = None,
+    scene: SceneContract | None = None,
 ) -> Sprint2BundleResult:
     if require_external_tools is None:
         require_external_tools = bool(os.environ.get("CI"))
-    scene = build_scene_from_project(project)
+    scene = scene or build_scene_from_project(project)
     project_dir = project_dir or (output_root / f"project-{project.project_id}")
     two_d_dir = project_dir / "2d"
     three_d_dir = project_dir / "3d"

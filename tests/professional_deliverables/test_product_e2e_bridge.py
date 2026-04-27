@@ -187,7 +187,8 @@ def test_professional_deliverables_retry_requires_failed_job(client, session_pay
     payload = response.json()
     assert payload["status"] == "queued"
     assert payload["progress_percent"] == 0
-    assert queued == [job_id]
+    assert payload["job_id"] != job_id
+    assert queued == [payload["job_id"]]
 
 
 def _touch(path: Path) -> Path:
@@ -226,8 +227,21 @@ def _make_task_job(client, session_payload):
         return bundle.id, job.id
 
 
-def _patch_task_generators(monkeypatch, root: Path, *, missing_mp4: bool = False, sprint3_skipped: bool = False, dwg_skipped: bool = False):
+def _patch_task_generators(
+    monkeypatch,
+    root: Path,
+    *,
+    calls: list[str] | None = None,
+    missing_mp4: bool = False,
+    sprint3_skipped: bool = False,
+    sprint3_failed_gate: bool = False,
+    dwg_skipped: bool = False,
+    glb_content: bytes = b"artifact",
+):
+    calls = calls if calls is not None else []
+
     def two_d(*_args, **_kwargs):
+        calls.append("2d")
         pdf = _touch(root / "2d" / "bundle.pdf")
         dxf = _touch(root / "2d" / "sheet-a100.dxf")
         s1_json = _touch(root / "2d" / "gate_summary.json")
@@ -238,58 +252,170 @@ def _patch_task_generators(monkeypatch, root: Path, *, missing_mp4: bool = False
         return SimpleNamespace(pdf_path=pdf, dxf_paths=[dxf], dwg_paths=[], gate_summary_json=s1_json, gate_summary_md=s1_md, gate_results=tuple(gates))
 
     def three_d(*_args, **_kwargs):
-        _touch(root / "3d" / "model.glb")
+        calls.append("3d")
+        glb = root / "3d" / "model.glb"
+        glb.parent.mkdir(parents=True, exist_ok=True)
+        glb.write_bytes(glb_content)
         _touch(root / "3d" / "model.fbx")
-        return SimpleNamespace(gate_results=(GateResult("3D", "pass", "ok"),))
+        textures_dir = root / "textures"
+        textures_dir.mkdir(parents=True, exist_ok=True)
+        _touch(textures_dir / "material.ktx2")
+        return SimpleNamespace(
+            project_dir=root,
+            three_d_dir=root / "3d",
+            textures_dir=textures_dir,
+            glb_path=glb,
+            fbx_path=root / "3d" / "model.fbx",
+            gate_results=(GateResult("3D", "pass", "ok"),),
+        )
 
-    def ar_video(*_args, **_kwargs):
-        _touch(root / "3d" / "model.usdz")
+    def usdz_stage(*, glb_path: Path, **_kwargs):
+        calls.append("usdz")
+        assert glb_path.read_bytes() == glb_content
+        usdz = _touch(root / "3d" / "model.usdz")
+        return SimpleNamespace(
+            project_dir=root,
+            three_d_dir=root / "3d",
+            usdz_path=usdz,
+            gate_results=(GateResult("USDZ size budget", "pass", "ok"),),
+            inventory_paths=(usdz,),
+        )
+
+    def video_stage(*, glb_path: Path, video_dir: Path, **_kwargs):
+        calls.append("video")
+        assert glb_path.read_bytes() == glb_content
+        camera_path_json = _touch(video_dir / "camera_path.json")
+        master_video = video_dir / "master_4k.mp4"
         if not missing_mp4:
-            _touch(root / "video" / "master_4k.mp4")
+            _touch(master_video)
+        status = "skipped" if sprint3_skipped else "pass"
+        gates = [
+            GateResult("Master video format", status, "ok"),
+            GateResult("Master video integrity", status, "ok"),
+        ]
+        if sprint3_failed_gate:
+            gates.append(GateResult("Camera collision sanity", "fail", "Bep va an at 28.0s intersects wall-f1-07"))
+        return SimpleNamespace(
+            project_dir=root,
+            video_dir=video_dir,
+            master_video_path=master_video,
+            camera_path_json=camera_path_json,
+            gate_results=tuple(gates),
+            inventory_paths=(master_video, camera_path_json),
+        )
+
+    def sprint3_summary(*, usdz_result, video_result, **_kwargs):
+        calls.append("summary")
         s3_json = _touch(root / "sprint3_gate_summary.json")
         s3_md = _touch(root / "sprint3_gate_summary.md")
-        status = "skipped" if sprint3_skipped else "pass"
-        return SimpleNamespace(gate_summary_json=s3_json, gate_summary_md=s3_md, gate_results=(GateResult("Video", status, "ok"),))
-
-    def sprint4_derivatives(bundle_root):
-        if not (bundle_root / "video" / "master_4k.mp4").exists():
-            raise RuntimeError("Missing required master video: video/master_4k.mp4")
-        return {
-            "reel": _touch(bundle_root / "video" / "reel_9x16_1080p.mp4"),
-            "hero_still": _touch(bundle_root / "derivatives" / "hero_still_4k.png"),
-            "gif_preview": _touch(bundle_root / "derivatives" / "preview.gif"),
-        }
-
-    def sprint4_manifest(bundle_root, **_kwargs):
-        return _touch(bundle_root / "manifest.json")
-
-    def sprint4_gates(bundle_root):
-        return [GateResult("Sprint 4", "pass", "ok")], _touch(bundle_root / "sprint4_gate_summary.json"), _touch(bundle_root / "sprint4_gate_summary.md")
+        gates = tuple(usdz_result.gate_results + video_result.gate_results)
+        return SimpleNamespace(
+            project_dir=root,
+            three_d_dir=root / "3d",
+            video_dir=video_result.video_dir,
+            usdz_path=usdz_result.usdz_path,
+            master_video_path=video_result.master_video_path,
+            gate_summary_json=s3_json,
+            gate_summary_md=s3_md,
+            gate_results=gates,
+        )
 
     monkeypatch.setattr("app.tasks.professional_deliverables.output_root_for", lambda _project_id, _version_id: root)
     monkeypatch.setattr("app.tasks.professional_deliverables.generate_project_2d_bundle", two_d)
     monkeypatch.setattr("app.tasks.professional_deliverables.generate_project_3d_bundle", three_d)
-    monkeypatch.setattr("app.tasks.professional_deliverables.generate_project_ar_video_bundle", ar_video)
-    monkeypatch.setattr("app.tasks.professional_deliverables.derive_sprint4_video_outputs", sprint4_derivatives)
-    monkeypatch.setattr("app.tasks.professional_deliverables.build_manifest", sprint4_manifest)
-    monkeypatch.setattr("app.tasks.professional_deliverables.run_sprint4_gates", sprint4_gates)
+    monkeypatch.setattr("app.tasks.professional_deliverables.export_project_usdz_stage", usdz_stage)
+    monkeypatch.setattr("app.tasks.professional_deliverables.render_project_video_stage", video_stage)
+    monkeypatch.setattr("app.tasks.professional_deliverables.write_project_sprint3_summary", sprint3_summary)
+
+
+def test_product_task_generates_sprint2_once_and_uses_split_sprint3_stages(client, session_payload, monkeypatch, tmp_path):
+    from app.tasks.professional_deliverables import run_professional_deliverable_bundle_task
+
+    _bundle_id, job_id = _make_task_job(client, session_payload)
+    calls: list[str] = []
+    _patch_task_generators(monkeypatch, tmp_path, calls=calls)
+
+    run_professional_deliverable_bundle_task(job_id)
+
+    assert calls == ["2d", "3d", "usdz", "video", "summary"]
+    assert calls.count("3d") == 1
+
+
+def test_product_task_stage_order_is_stage_aligned(client, session_payload, monkeypatch, tmp_path):
+    from app.services.professional_deliverables.orchestrator import mark_job_stage as real_mark_job_stage
+    import app.tasks.professional_deliverables as task_module
+
+    _bundle_id, job_id = _make_task_job(client, session_payload)
+    _patch_task_generators(monkeypatch, tmp_path)
+    stages: list[str] = []
+    progresses: list[int] = []
+
+    def recording_mark_job_stage(db, job, *, stage: str, progress: int | None = None, bundle=None):
+        stages.append(stage)
+        progresses.append(progress if progress is not None else -1)
+        return real_mark_job_stage(db, job, stage=stage, progress=progress, bundle=bundle)
+
+    monkeypatch.setattr(task_module, "mark_job_stage", recording_mark_job_stage)
+
+    run_professional_deliverable_bundle_task = task_module.run_professional_deliverable_bundle_task
+    run_professional_deliverable_bundle_task(job_id)
+
+    assert stages == ["adapter", "export_2d", "export_3d", "export_usdz", "render_video", "validate"]
+    assert progresses == [10, 25, 50, 65, 85, 95]
+
+
+def test_product_task_does_not_overwrite_glb_after_export_3d(client, session_payload, monkeypatch, tmp_path):
+    from app.tasks.professional_deliverables import run_professional_deliverable_bundle_task
+
+    _bundle_id, job_id = _make_task_job(client, session_payload)
+    glb_content = b"stable-product-glb"
+    _patch_task_generators(monkeypatch, tmp_path, glb_content=glb_content)
+
+    run_professional_deliverable_bundle_task(job_id)
+
+    assert (tmp_path / "3d" / "model.glb").read_bytes() == glb_content
+
+
+def test_product_task_does_not_call_sprint3_compatibility_wrapper(client, session_payload, monkeypatch, tmp_path):
+    from app.services.professional_deliverables import sprint3_demo
+    import app.tasks.professional_deliverables as task_module
+
+    assert not hasattr(task_module, "generate_project_ar_video_bundle")
+
+    def forbidden_wrapper(*_args, **_kwargs):
+        raise AssertionError("product task must use split Sprint 3 helpers")
+
+    monkeypatch.setattr(sprint3_demo, "generate_project_ar_video_bundle", forbidden_wrapper)
+    _bundle_id, job_id = _make_task_job(client, session_payload)
+    _patch_task_generators(monkeypatch, tmp_path)
+
+    task_module.run_professional_deliverable_bundle_task(job_id)
 
 
 def test_product_task_succeeds_with_required_artifacts_and_assets(client, session_payload, monkeypatch, tmp_path):
     from app.tasks.professional_deliverables import run_professional_deliverable_bundle_task
 
     bundle_id, job_id = _make_task_job(client, session_payload)
+    stale_outputs = [
+        _touch(tmp_path / "manifest.json"),
+        _touch(tmp_path / "sprint4_gate_summary.json"),
+        _touch(tmp_path / "sprint4_gate_summary.md"),
+        _touch(tmp_path / "derivatives" / "hero_still_4k.png"),
+        _touch(tmp_path / "derivatives" / "preview.gif"),
+    ]
     _patch_task_generators(monkeypatch, tmp_path)
 
     result = run_professional_deliverable_bundle_task(job_id)
 
     assert result["status"] == "completed"
+    assert all(not output.exists() for output in stale_outputs)
     with SessionLocal() as db:
         bundle = db.get(ProfessionalDeliverableBundle, bundle_id)
         assert bundle.status == "ready"
         assert bundle.quality_status == "pass"
         roles = {asset.asset_role for asset in bundle.assets}
         assert {"pdf", "dxf", "glb", "fbx", "usdz", "mp4", "gate_summary_json", "gate_summary_md"} <= roles
+        assert all(asset.asset_role not in {"marketing_reel", "hero_still", "gif_preview", "manifest", "sprint4_gate_summary_json"} for asset in bundle.assets)
 
 
 def test_product_task_fails_for_missing_mp4_or_skipped_sprint3_gate(client, session_payload, monkeypatch, tmp_path):
@@ -308,6 +434,8 @@ def test_product_task_fails_for_missing_mp4_or_skipped_sprint3_gate(client, sess
     with SessionLocal() as db:
         bundle = db.get(ProfessionalDeliverableBundle, bundle_id)
         assert bundle.status == "failed"
+        roles = {asset.asset_role for asset in bundle.assets}
+        assert "mp4" not in roles
 
     bundle_id, job_id = _make_task_job(client, session_payload)
     _patch_task_generators(monkeypatch, tmp_path / "skipped", sprint3_skipped=True)
@@ -315,13 +443,35 @@ def test_product_task_fails_for_missing_mp4_or_skipped_sprint3_gate(client, sess
     try:
         run_professional_deliverable_bundle_task(job_id)
     except RuntimeError as exc:
-        assert "Sprint 3 gate skipped" in str(exc)
+        assert "Sprint 3 skipped" in str(exc)
     else:
         raise AssertionError("skipped Sprint 3 gate should fail")
 
     with SessionLocal() as db:
         bundle = db.get(ProfessionalDeliverableBundle, bundle_id)
         assert bundle.status == "failed"
+
+
+def test_product_task_keeps_partial_assets_when_final_validation_fails(client, session_payload, monkeypatch, tmp_path):
+    from app.tasks.professional_deliverables import run_professional_deliverable_bundle_task
+
+    bundle_id, job_id = _make_task_job(client, session_payload)
+    _patch_task_generators(monkeypatch, tmp_path, sprint3_failed_gate=True)
+
+    try:
+        run_professional_deliverable_bundle_task(job_id)
+    except RuntimeError as exc:
+        assert "Camera collision sanity" in str(exc)
+    else:
+        raise AssertionError("failed camera gate should fail final validation")
+
+    with SessionLocal() as db:
+        bundle = db.get(ProfessionalDeliverableBundle, bundle_id)
+        assert bundle.status == "failed"
+        assert bundle.quality_status == "partial"
+        roles = {asset.asset_role for asset in bundle.assets}
+        assert {"pdf", "dxf", "glb", "fbx", "usdz", "mp4", "gate_summary_json", "gate_summary_md"} <= roles
+        assert {asset.status for asset in bundle.assets if asset.asset_role != "dwg"} == {"partial"}
 
 
 def test_product_task_allows_only_dwg_oda_skip_as_partial(client, session_payload, monkeypatch, tmp_path):

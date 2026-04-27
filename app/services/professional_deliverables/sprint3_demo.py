@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import shutil
 import tempfile
@@ -15,7 +14,8 @@ from app.services.professional_deliverables.camera_path import build_camera_path
 from app.services.professional_deliverables.golden_fixture import build_golden_townhouse
 from app.services.professional_deliverables.ktx2_encoder import ExternalToolError, discover_ktx_tool
 from app.services.professional_deliverables.scene_builder import build_scene_from_project
-from app.services.professional_deliverables.sprint2_demo import generate_golden_3d_bundle, generate_project_3d_bundle
+from app.services.professional_deliverables.scene_contract import SceneContract
+from app.services.professional_deliverables.sprint2_demo import generate_project_3d_bundle
 from app.services.professional_deliverables.usdz_converter import USDZConversionError, export_usdz_from_glb
 from app.services.professional_deliverables.usdz_validators import (
     validate_usdz_material_parity,
@@ -61,48 +61,54 @@ class Sprint3BundleResult:
         }
 
 
+@dataclass(frozen=True)
+class USDZStageResult:
+    project_dir: Path
+    three_d_dir: Path
+    usdz_path: Path
+    gate_results: tuple[GateResult, ...]
+    inventory_paths: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
+class VideoStageResult:
+    project_dir: Path
+    video_dir: Path
+    master_video_path: Path
+    camera_path_json: Path
+    gate_results: tuple[GateResult, ...]
+    inventory_paths: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
+class Sprint3SummaryResult:
+    project_dir: Path
+    three_d_dir: Path
+    video_dir: Path
+    usdz_path: Path
+    master_video_path: Path
+    gate_results: tuple[GateResult, ...]
+    gate_summary_json: Path
+    gate_summary_md: Path
+
+
 def _clean_dir(path: Path) -> None:
     if path.exists():
         shutil.rmtree(path)
     path.mkdir(parents=True, exist_ok=True)
 
 
-def generate_project_ar_video_bundle(
-    project: DrawingProject,
-    output_root: Path,
+def export_project_usdz_stage(
     *,
-    require_external_tools: bool | None = None,
-    project_dir: Path | None = None,
-) -> Sprint3BundleResult:
-    if require_external_tools is None:
-        require_external_tools = bool(os.environ.get("CI"))
-    sprint2 = generate_project_3d_bundle(
-        project,
-        output_root,
-        require_external_tools=require_external_tools,
-        project_dir=project_dir,
-    )
-    scene = build_scene_from_project(project)
-    project_dir = sprint2.project_dir
-    three_d_dir = sprint2.three_d_dir
-    textures_dir = sprint2.textures_dir
-    video_dir = project_dir / "video"
-    _clean_dir(video_dir)
-
+    scene: SceneContract,
+    glb_path: Path,
+    textures_dir: Path,
+    three_d_dir: Path,
+    project_dir: Path,
+    require_external_tools: bool,
+) -> USDZStageResult:
     gate_overrides: list[GateResult] = []
     usdz_path = three_d_dir / "model.usdz"
-    master_video_path = video_dir / "master_4k.mp4"
-    camera_path = build_camera_path(scene)
-    if camera_path.collision_warnings:
-        gate_overrides.append(
-            GateResult(
-                "Camera collision sanity",
-                "fail",
-                "; ".join(camera_path.collision_warnings[:8]),
-            )
-        )
-    else:
-        gate_overrides.append(GateResult("Camera collision sanity", "pass", "0 camera keyframes intersect wall bounding boxes"))
 
     try:
         ktx_tool = discover_ktx_tool(require_binary=require_external_tools)
@@ -110,11 +116,11 @@ def generate_project_ar_video_bundle(
         ktx_tool = None
         gate_overrides.append(GateResult("USDZ texture payload build", "fail" if require_external_tools else "skipped", str(exc)))
 
-    if ktx_tool is not None and sprint2.glb_path.exists():
+    if ktx_tool is not None and glb_path.exists():
         try:
             export_usdz_from_glb(
                 scene,
-                sprint2.glb_path,
+                glb_path,
                 textures_dir,
                 three_d_dir,
                 ktx_tool=ktx_tool,
@@ -131,12 +137,82 @@ def generate_project_ar_video_bundle(
             )
         )
 
+    gate_results = [
+        *gate_overrides,
+        validate_usdz_size_budget(usdz_path, three_d_dir / "usdz-budget-report.json", require_binary=require_external_tools),
+        validate_usdz_structural_integrity(
+            usdz_path,
+            three_d_dir / "usdz-structural-report.json",
+            require_binary=require_external_tools,
+        ),
+        validate_usdz_material_parity(
+            glb_path,
+            usdz_path,
+            scene,
+            three_d_dir / "usdz-material-parity-report.json",
+            require_binary=require_external_tools,
+        ),
+        validate_usdz_texture_payload(
+            usdz_path,
+            three_d_dir / "usdz-texture-report.json",
+            require_binary=require_external_tools,
+        ),
+    ]
+
+    inventory_paths = (
+        three_d_dir / "model.glb",
+        three_d_dir / "model.fbx",
+        usdz_path,
+        three_d_dir / "model_lite.usdz",
+        three_d_dir / "model_lite.usd",
+        three_d_dir / "usdz-export-report.json",
+        three_d_dir / "usdz-material-report.json",
+        three_d_dir / "usdz-budget-report.json",
+        three_d_dir / "usdz-structural-report.json",
+        three_d_dir / "usdz-material-parity-report.json",
+        three_d_dir / "usdz-texture-report.json",
+    )
+    return USDZStageResult(
+        project_dir=project_dir,
+        three_d_dir=three_d_dir,
+        usdz_path=usdz_path,
+        gate_results=tuple(gate_results),
+        inventory_paths=inventory_paths,
+    )
+
+
+def render_project_video_stage(
+    *,
+    scene: SceneContract,
+    glb_path: Path,
+    project_dir: Path,
+    video_dir: Path,
+    require_external_tools: bool,
+) -> VideoStageResult:
+    video_dir.mkdir(parents=True, exist_ok=True)
+    gate_overrides: list[GateResult] = []
+    master_video_path = video_dir / "master_4k.mp4"
+    camera_path_json = video_dir / "camera_path.json"
+    camera_path = build_camera_path(scene)
+    if camera_path.collision_warnings:
+        if require_external_tools:
+            raise VideoRenderError("CAMERA_PATH_UNSAFE: " + "; ".join(camera_path.collision_warnings[:8]))
+        gate_overrides.append(
+            GateResult(
+                "Camera collision sanity",
+                "fail",
+                "; ".join(camera_path.collision_warnings[:8]),
+            )
+        )
+    else:
+        gate_overrides.append(GateResult("Camera collision sanity", "pass", "0 camera keyframes intersect wall bounding boxes"))
+
     with tempfile.TemporaryDirectory(prefix="sprint3-video-") as temp_name:
         temp_dir = Path(temp_name)
         second_video: Path | None = None
         try:
             rendered = render_master_video(
-                sprint2.glb_path,
+                glb_path,
                 scene,
                 camera_path,
                 video_dir,
@@ -150,7 +226,7 @@ def generate_project_ar_video_bundle(
             else:
                 second_video_dir = temp_dir / "second-video"
                 second_video = render_master_video(
-                    sprint2.glb_path,
+                    glb_path,
                     scene,
                     camera_path,
                     second_video_dir,
@@ -164,24 +240,6 @@ def generate_project_ar_video_bundle(
 
         gate_results = [
             *gate_overrides,
-            validate_usdz_size_budget(usdz_path, three_d_dir / "usdz-budget-report.json", require_binary=require_external_tools),
-            validate_usdz_structural_integrity(
-                usdz_path,
-                three_d_dir / "usdz-structural-report.json",
-                require_binary=require_external_tools,
-            ),
-            validate_usdz_material_parity(
-                sprint2.glb_path,
-                usdz_path,
-                scene,
-                three_d_dir / "usdz-material-parity-report.json",
-                require_binary=require_external_tools,
-            ),
-            validate_usdz_texture_payload(
-                usdz_path,
-                three_d_dir / "usdz-texture-report.json",
-                require_binary=require_external_tools,
-            ),
             validate_master_video_format(
                 master_video_path,
                 video_dir / "ffprobe-master-report.json",
@@ -200,23 +258,37 @@ def generate_project_ar_video_bundle(
             ),
         ]
 
-    inventory_paths = [
-        three_d_dir / "model.glb",
-        three_d_dir / "model.fbx",
-        usdz_path,
-        three_d_dir / "model_lite.usdz",
-        three_d_dir / "model_lite.usd",
-        three_d_dir / "usdz-budget-report.json",
-        three_d_dir / "usdz-structural-report.json",
-        three_d_dir / "usdz-material-parity-report.json",
-        three_d_dir / "usdz-texture-report.json",
+    inventory_paths = (
         master_video_path,
-        video_dir / "camera_path.json",
+        camera_path_json,
+        video_dir / "render_stills_report.json",
         video_dir / "ffprobe-master-report.json",
         video_dir / "video-integrity-report.json",
         video_dir / "video-determinism-report.json",
-    ]
-    inventory = build_file_inventory(inventory_paths, project_dir)
+    )
+    return VideoStageResult(
+        project_dir=project_dir,
+        video_dir=video_dir,
+        master_video_path=master_video_path,
+        camera_path_json=camera_path_json,
+        gate_results=tuple(gate_results),
+        inventory_paths=inventory_paths,
+    )
+
+
+def write_project_sprint3_summary(
+    *,
+    project_dir: Path,
+    three_d_dir: Path,
+    video_dir: Path,
+    usdz_result: USDZStageResult,
+    video_result: VideoStageResult,
+) -> Sprint3BundleResult:
+    gate_results = [*usdz_result.gate_results, *video_result.gate_results]
+    inventory = build_file_inventory(
+        [*usdz_result.inventory_paths, *video_result.inventory_paths],
+        project_dir,
+    )
     summary_json, summary_md = write_gate_outputs(
         project_dir,
         gate_results,
@@ -229,11 +301,55 @@ def generate_project_ar_video_bundle(
         project_dir=project_dir,
         three_d_dir=three_d_dir,
         video_dir=video_dir,
-        usdz_path=usdz_path,
-        master_video_path=master_video_path,
+        usdz_path=usdz_result.usdz_path,
+        master_video_path=video_result.master_video_path,
         gate_results=tuple(gate_results),
         gate_summary_json=summary_json,
         gate_summary_md=summary_md,
+    )
+
+
+def generate_project_ar_video_bundle(
+    project: DrawingProject,
+    output_root: Path,
+    *,
+    require_external_tools: bool | None = None,
+    project_dir: Path | None = None,
+) -> Sprint3BundleResult:
+    if require_external_tools is None:
+        require_external_tools = bool(os.environ.get("CI"))
+    scene = build_scene_from_project(project)
+    sprint2 = generate_project_3d_bundle(
+        project,
+        output_root,
+        require_external_tools=require_external_tools,
+        project_dir=project_dir,
+        scene=scene,
+    )
+    video_dir = sprint2.project_dir / "video"
+    _clean_dir(video_dir)
+
+    usdz_result = export_project_usdz_stage(
+        scene=scene,
+        glb_path=sprint2.glb_path,
+        textures_dir=sprint2.textures_dir,
+        three_d_dir=sprint2.three_d_dir,
+        project_dir=sprint2.project_dir,
+        require_external_tools=require_external_tools,
+    )
+    video_result = render_project_video_stage(
+        scene=scene,
+        glb_path=sprint2.glb_path,
+        project_dir=sprint2.project_dir,
+        video_dir=video_dir,
+        require_external_tools=require_external_tools,
+    )
+    return write_project_sprint3_summary(
+        project_dir=sprint2.project_dir,
+        three_d_dir=sprint2.three_d_dir,
+        video_dir=video_dir,
+        usdz_result=usdz_result,
+        video_result=video_result,
     )
 
 

@@ -110,6 +110,11 @@ def _read_png_chunks(path: Path) -> tuple[dict[str, int], bytes]:
     return info, bytes(compressed)
 
 
+def read_png_dimensions(path: Path) -> tuple[int, int]:
+    info, _ = _read_png_chunks(path)
+    return (info["width"], info["height"])
+
+
 def sample_png_pixel(path: Path, *, x: int = 0, y: int = 0) -> tuple[int, int, int, int]:
     info, compressed = _read_png_chunks(path)
     if info["interlace"] != 0:

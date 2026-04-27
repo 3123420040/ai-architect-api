@@ -211,7 +211,7 @@ def export_usdz_from_glb(
             max_resolution_px=AR_QUICK_LOOK_LITE_TEXTURE_PX,
         )
 
-        stage_path = package_root / "model_lite.usda"
+        stage_path = package_root / "model_lite.usd"
         export_report_path = three_d_dir / "usdz-export-report.json"
         try:
             blender = run_blender_script(
@@ -241,7 +241,7 @@ def export_usdz_from_glb(
         except (USDZConversionError, ExternalToolError) as exc:
             raise USDZConversionError(str(exc)) from exc
 
-        stage_copy = three_d_dir / "model_lite.usda"
+        stage_copy = three_d_dir / "model_lite.usd"
         shutil.copyfile(stage_path, stage_copy)
         usdz_path = three_d_dir / "model.usdz"
         shutil.copyfile(lite_path, usdz_path)

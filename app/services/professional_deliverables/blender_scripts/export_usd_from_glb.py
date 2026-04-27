@@ -69,6 +69,13 @@ def _usd_export_kwargs(filepath: Path) -> dict:
         "export_normals": True,
         "export_materials": False,
         "export_textures": False,
+        "convert_orientation": True,
+        "export_global_forward_selection": "NEGATIVE_Z",
+        "export_global_up_selection": "Y",
+        "root_prim_path": "/World",
+        "convert_scene_units": "METERS",
+        "meters_per_unit": 1.0,
+        "triangulate_meshes": True,
     }
     return {key: value for key, value in candidates.items() if key == "filepath" or key in properties}
 
@@ -101,7 +108,12 @@ def main() -> None:
 
     usd_path = Path(args.usd)
     usd_path.parent.mkdir(parents=True, exist_ok=True)
-    bpy.ops.wm.usd_export(**_usd_export_kwargs(usd_path))
+    export_result = bpy.ops.wm.usd_export(**_usd_export_kwargs(usd_path))
+    if "FINISHED" not in export_result:
+        raise SystemExit(f"USD export did not finish: {sorted(export_result)}")
+    if not usd_path.exists() or usd_path.stat().st_size == 0:
+        siblings = sorted(path.name for path in usd_path.parent.glob("*"))
+        raise SystemExit(f"USD export did not create {usd_path}; package dir contains {siblings}")
 
     report = {
         "mesh_count": len(objects),
@@ -109,6 +121,8 @@ def main() -> None:
         "triangles_after": after_triangles,
         "pivot_translation_m": [-center_x, -center_y, 0.0],
         "target_triangles": args.target_triangles,
+        "usd_path": str(usd_path),
+        "usd_size_bytes": usd_path.stat().st_size,
     }
     Path(args.report_json).write_text(json.dumps(report, indent=2), encoding="utf-8")
 

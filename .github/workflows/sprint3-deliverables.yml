@@ -100,7 +100,7 @@ jobs:
             storage/professional-deliverables/project-golden-townhouse/sprint3_gate_summary.md
             storage/professional-deliverables/project-golden-townhouse/sprint3_gate_summary.json
             storage/professional-deliverables/project-golden-townhouse/3d/usdz-*.json
-            storage/professional-deliverables/project-golden-townhouse/3d/model_lite.usda
+            storage/professional-deliverables/project-golden-townhouse/3d/model_lite.usd
             storage/professional-deliverables/project-golden-townhouse/video/*.json
           if-no-files-found: ignore
 

@@ -197,7 +197,7 @@ def generate_golden_ar_video_bundle(
         three_d_dir / "model.fbx",
         usdz_path,
         three_d_dir / "model_lite.usdz",
-        three_d_dir / "model_lite.usda",
+        three_d_dir / "model_lite.usd",
         three_d_dir / "usdz-budget-report.json",
         three_d_dir / "usdz-structural-report.json",
         three_d_dir / "usdz-material-parity-report.json",

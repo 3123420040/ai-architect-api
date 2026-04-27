@@ -50,7 +50,17 @@ def run_blender_script(
     tool = discover_blender(require_binary=require_binary)
     if tool is None:
         return None
-    command = [str(tool.path), "--background", "--factory-startup", "--python", str(script_path), "--", *args]
+    command = [
+        str(tool.path),
+        "--background",
+        "--factory-startup",
+        "--python-exit-code",
+        "1",
+        "--python",
+        str(script_path),
+        "--",
+        *args,
+    ]
     result = _run(command, cwd=cwd)
     if result.returncode != 0:
         detail = "\n".join(line for line in (result.stdout + result.stderr).splitlines() if line.strip())

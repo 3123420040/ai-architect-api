@@ -13,6 +13,7 @@ from app.schemas import Pagination, PaginatedProjects, ProjectCreate, ProjectUpd
 from app.services.audit import log_action
 from app.services.briefing import build_clarification_state
 from app.services.brief_contract import build_brief_contract_payload
+from app.services.storage import resolve_browser_asset_url
 
 
 router = APIRouter(
@@ -26,11 +27,28 @@ def _pick_current_version(versions: list[DesignVersion]) -> DesignVersion | None
     if not versions:
         return None
 
-    active_versions = [item for item in versions if item.status != "superseded"]
-    if active_versions:
-        return max(active_versions, key=lambda item: item.version_number)
+    def newest(items: list[DesignVersion]) -> DesignVersion | None:
+        return max(items, key=lambda item: (item.version_number, item.created_at)) if items else None
 
-    return max(versions, key=lambda item: item.version_number)
+    for statuses in (
+        {"locked"},
+        {"handoff_ready"},
+        {"delivered"},
+        {"under_review", "generated", "approved"},
+    ):
+        candidate = newest([item for item in versions if item.status in statuses])
+        if candidate:
+            return candidate
+
+    return newest([item for item in versions if item.status != "superseded"]) or newest(versions)
+
+
+def _asset_urls(urls: list | None) -> list[str]:
+    return [resolved for url in (urls or []) if (resolved := resolve_browser_asset_url(str(url)))]
+
+
+def _asset_url(url: str | None) -> str | None:
+    return resolve_browser_asset_url(url)
 
 
 def _serialize_package(package: ExportPackage, versions: dict[str, DesignVersion]) -> dict:
@@ -72,16 +90,16 @@ def _serialize_project(project: Project, versions: list[DesignVersion]) -> dict:
         "clarification_state": clarification_state,
         "current_version_number": current.version_number if current else None,
         "current_version_status": current.status if current else None,
-        "thumbnail_url": current.floor_plan_urls[0] if current and current.floor_plan_urls else None,
+        "thumbnail_url": _asset_url(current.floor_plan_urls[0]) if current and current.floor_plan_urls else None,
         "versions": [
             {
                 "id": version.id,
                 "version_number": version.version_number,
                 "status": version.status,
-                "thumbnail_url": version.floor_plan_urls[0] if version.floor_plan_urls else None,
-                "floor_plan_urls": version.floor_plan_urls,
-                "model_url": version.model_url,
-                "render_urls": version.render_urls,
+                "thumbnail_url": _asset_url(version.floor_plan_urls[0]) if version.floor_plan_urls else None,
+                "floor_plan_urls": _asset_urls(version.floor_plan_urls),
+                "model_url": _asset_url(version.model_url),
+                "render_urls": _asset_urls(version.render_urls),
                 "option_label": version.option_label,
                 "option_description": version.option_description,
                 "option_title_vi": ((version.generation_metadata or {}).get("decision_metadata") or {}).get("option_title_vi") or version.option_label,

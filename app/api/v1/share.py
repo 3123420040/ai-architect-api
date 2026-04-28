@@ -13,6 +13,7 @@ from app.deps import get_current_user, require_roles
 from app.models import DesignVersion, Project, ShareLink, User
 from app.schemas import ShareLinkResponse
 from app.services.audit import log_action
+from app.services.storage import resolve_browser_asset_url
 
 
 router = APIRouter(tags=["share"])
@@ -55,8 +56,12 @@ def get_shared_project(token: str, db: Session = Depends(get_db)) -> dict:
             "id": version.id,
             "version_number": version.version_number,
             "status": version.status,
-            "thumbnail_url": version.floor_plan_urls[0] if version.floor_plan_urls else None,
-            "floor_plan_urls": version.floor_plan_urls,
+            "thumbnail_url": resolve_browser_asset_url(version.floor_plan_urls[0]) if version.floor_plan_urls else None,
+            "floor_plan_urls": [
+                resolved
+                for url in (version.floor_plan_urls or [])
+                if (resolved := resolve_browser_asset_url(str(url)))
+            ],
         }
         for version in sorted(project.versions, key=lambda item: item.version_number)
     ]

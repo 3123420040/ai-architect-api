@@ -581,8 +581,8 @@ def test_project_current_version_ignores_superseded_versions(client, session_pay
         headers=auth_headers(token),
     )
     assert revision_project.status_code == 200
-    assert revision_project.json()["current_version_status"] == "generated"
-    assert revision_project.json()["current_version_number"] == 4
+    assert revision_project.json()["current_version_status"] == "locked"
+    assert revision_project.json()["current_version_number"] == 1
     assert revision_project.json()["status"] == "options_generated"
 
 

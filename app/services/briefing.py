@@ -23,14 +23,14 @@ STYLE_PATTERNS = (
 )
 
 ORIENTATION_PATTERNS = {
+    "northeast": ("huong dong bac", "dong bac"),
+    "northwest": ("huong tay bac", "tay bac"),
+    "southeast": ("huong dong nam", "dong nam"),
+    "southwest": ("huong tay nam", "tay nam"),
     "north": ("huong bac",),
     "south": ("huong nam",),
     "east": ("huong dong",),
     "west": ("huong tay",),
-    "northeast": ("dong bac",),
-    "northwest": ("tay bac",),
-    "southeast": ("dong nam",),
-    "southwest": ("tay nam",),
 }
 
 SPECIAL_REQUEST_PATTERNS = {
@@ -46,7 +46,7 @@ SPECIAL_REQUEST_PATTERNS = {
 LIFESTYLE_PATTERNS = {
     "work_from_home": ("lam viec tai nha", "work from home", "wfh"),
     "elderly_friendly": ("nguoi gia", "ong ba", "cha me lon tuoi"),
-    "family_with_kids": ("tre em", "con nho", "em be"),
+    "family_with_kids": ("tre em", "tre nho", "con nho", "em be"),
     "pet_friendly": ("thu cung", "cho meo", "pet"),
     "daylight_priority": ("nhieu anh sang", "lay sang", "anh sang tu nhien"),
     "ventilation_priority": ("thong gio", "gio tu nhien", "mat me"),
@@ -218,6 +218,19 @@ def _append_note(brief: dict[str, Any], value: str) -> None:
     if value not in notes:
         notes.append(value)
     brief["notes"] = notes
+
+
+def _clean_phrase(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip(" .,;:")).strip()
+
+
+def _priority_label(value: str) -> str:
+    cleaned = _clean_phrase(value)
+    if "anh sang" in cleaned and "thong gio" in cleaned:
+        return "Nhiều ánh sáng tự nhiên và thông gió"
+    if "khong gian bi" in cleaned or "phong toi" in cleaned:
+        return "Tránh không gian bí, tối"
+    return cleaned
 
 
 def _merge_dict(existing: dict | None, incoming: dict | None) -> dict:
@@ -437,7 +450,7 @@ def analyze_message_to_brief(message: str, existing: dict | None = None) -> dict
         _add_fact(facts, "project_mode", "Phạm vi dự án", PROJECT_MODE_LABELS["new_build"])
 
     lot = dict(brief.get("lot") or {})
-    dims = re.search(r"(\d+(?:[.,]\d+)?)\s*[x×]\s*(\d+(?:[.,]\d+)?)", normalized)
+    dims = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:x|×|\*|by)\s*(\d+(?:[.,]\d+)?)", normalized)
     if dims:
         width = float(dims.group(1).replace(",", "."))
         depth = float(dims.group(2).replace(",", "."))
@@ -541,9 +554,19 @@ def analyze_message_to_brief(message: str, existing: dict | None = None) -> dict
         _add_fact(facts, "green_balcony", "Không gian đặc biệt", "Ban công xanh")
 
     if must_haves := re.search(r"(bat buoc|phai co|muon co)\s+(.+)", normalized):
-        _append_unique(brief, "must_haves", must_haves.group(2).strip())
-    if must_not_haves := re.search(r"(khong muon|tranh|khong can)\s+(.+)", normalized):
-        _append_unique(brief, "must_not_haves", must_not_haves.group(2).strip())
+        phrase = must_haves.group(2).strip()
+        negative_split = re.search(r"\s+va\s+(tranh|khong muon|khong can|han che)\s+(.+)", phrase)
+        if negative_split:
+            must_phrase = phrase[: negative_split.start()].strip()
+            negative_phrase = negative_split.group(2).strip()
+            if must_phrase:
+                _append_unique(brief, "must_haves", _priority_label(must_phrase))
+            if negative_phrase:
+                _append_unique(brief, "must_not_haves", _priority_label(negative_phrase))
+        else:
+            _append_unique(brief, "must_haves", _priority_label(phrase))
+    if must_not_haves := re.search(r"(khong muon|tranh|khong can|han che)\s+(.+)", normalized):
+        _append_unique(brief, "must_not_haves", _priority_label(must_not_haves.group(2).strip()))
 
     if brief.get("project_type") == "apartment_reno" and _contains_any(
         normalized,

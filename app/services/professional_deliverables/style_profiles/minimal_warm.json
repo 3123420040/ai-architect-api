@@ -1,0 +1,49 @@
+{
+  "style_id": "minimal_warm",
+  "display_name": "Tối giản ấm",
+  "version": "2026.04",
+  "aliases": ["minimal warm", "warm minimal", "tối giản ấm", "toi gian am", "hiện đại ấm", "hien dai am"],
+  "customer_language_signals": ["tối giản", "ấm", "gọn", "ít bảo trì", "dễ dọn", "trung tính", "nhẹ nhàng", "không cầu kỳ", "low maintenance"],
+  "visual_signals": ["warm neutral palette", "light wood", "plain walls", "soft indirect lighting", "built-in storage", "minimal facade"],
+  "spatial_rules": {
+    "primary_strategy": "simple rectangular room sequence with efficient storage and clear circulation",
+    "ventilation": "use practical windows and compact lightwell when needed",
+    "green_zones": ["small front planter", "balcony planter when low maintenance"],
+    "privacy": "simple recessed entry and controlled street-facing openings"
+  },
+  "room_defaults": {
+    "living": {"compact_but_open": true, "built_in_storage": true},
+    "kitchen_dining": {"prefer_linear_or_l_shape": true, "low_visual_clutter": true},
+    "bedroom": {"storage_priority": true, "calm_palette": true},
+    "bathroom": {"simple_fixture_zone": true}
+  },
+  "opening_rules": {
+    "window_to_wall_ratio": "moderate",
+    "door_style": "flat panel or simple timber tone",
+    "window_style": "clean rectangular windows with simple shading",
+    "avoid": "many small decorative openings"
+  },
+  "facade_rules": {
+    "massing": "calm flat planes with one or two warm accents",
+    "screening": "minimal vertical screen only where privacy or sun control is needed",
+    "greenery": "controlled low-maintenance planters",
+    "expression": "quiet, tidy, and warm"
+  },
+  "material_palette": {
+    "base": ["warm white", "greige", "light grey"],
+    "accent": ["light oak", "travertine-look tile", "matte beige"],
+    "landscape": ["low-maintenance planter"],
+    "metal": ["matte black", "champagne bronze"]
+  },
+  "drawing_rules": {
+    "plan_notes": ["show built-in storage where useful", "keep room sequence legible", "avoid overdecorating notes"],
+    "elevation_notes": ["mark warm accent panels", "show clean openings", "keep concept facade simple"],
+    "line_emphasis": "storage, circulation, and main openings should be clear"
+  },
+  "avoid_rules": ["busy decorative facade", "too many materials", "oversized maintenance-heavy planting", "dark cluttered rooms"],
+  "validation_rules": ["storage intent should appear for apartment or compact townhouse scenarios", "materials should stay restrained", "assumptions must stay concept-only"],
+  "explanation_templates": {
+    "style_summary": "Hướng tối giản ấm phù hợp khi gia đình muốn không gian gọn, dễ chăm sóc và vẫn có cảm giác ấm.",
+    "confirmation": "Em đang nghiêng về hướng tối giản ấm: ít chi tiết, vật liệu sáng ấm và ưu tiên lưu trữ gọn gàng."
+  }
+}

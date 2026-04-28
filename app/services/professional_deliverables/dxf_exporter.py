@@ -142,6 +142,15 @@ def _draw_site(msp, project: DrawingProject) -> None:
     _draw_north_arrow(msp, (project.lot_width_m + 0.85, max(project.lot_depth_m - 1.2, 0.8)), project.north_angle_degrees)
 
 
+def _draw_cover_index(msp, project: DrawingProject) -> None:
+    _add_text(msp, "Professional Concept 2D Package", (0.0, 9.5), height=0.32, layer="A-ANNO-TEXT")
+    _add_text(msp, project.project_name, (0.0, 8.95), height=0.24, layer="A-ANNO-TEXT")
+    _add_text(msp, project.concept_note, (0.0, 8.45), height=0.18, layer="A-ANNO-TEXT")
+    _add_text(msp, "Muc luc: A-100 site, A-101 floor plans, A-201 elevation, A-301 section, A-601/A-602 schedules, A-603 assumptions/style notes", (0.0, 7.85), height=0.14, layer="A-ANNO-TEXT")
+    _add_text(msp, "Pham vi: concept/schematic only, not for construction or permit use.", (0.0, 7.45), height=0.14, layer="A-ANNO-TEXT")
+    _add_polyline(msp, [(0, 7.15), (10.0, 7.15), (10.0, 10.0), (0, 10.0)], layer="A-ANNO-TTLB", closed=True)
+
+
 def _draw_elevations(msp, project: DrawingProject) -> None:
     height = project.storeys * 3.3 + 0.8
     specs = (
@@ -171,10 +180,63 @@ def _draw_sections(msp, project: DrawingProject) -> None:
         _add_text(msp, label, (ox, height + 0.28), height=0.18, layer="A-ANNO-TEXT")
 
 
+def _draw_room_area_schedule(msp, project: DrawingProject) -> None:
+    _add_text(msp, "Bang phong va dien tich", (0.0, 10.0), height=0.24, layer="A-ANNO-TEXT")
+    y = 9.45
+    _add_text(msp, "Tang | Phong | Loai | Dien tich", (0.0, y), height=0.16, layer="A-AREA-IDEN")
+    y -= 0.38
+    for room in project.rooms:
+        _add_text(
+            msp,
+            f"Tang {room.floor} | {room.name} | {room.original_type or room.category or '-'} | {room.display_area_m2:.1f} m2",
+            (0.0, y),
+            height=0.14,
+            layer="A-AREA-IDEN",
+        )
+        y -= 0.32
+    _add_polyline(msp, [(-0.2, y + 0.12), (11.0, y + 0.12), (11.0, 9.75), (-0.2, 9.75)], layer="A-AREA", closed=True)
+
+
+def _draw_door_window_schedule(msp, project: DrawingProject) -> None:
+    _add_text(msp, "Bang cua di va cua so", (0.0, 10.0), height=0.24, layer="A-ANNO-TEXT")
+    y = 9.45
+    _add_text(msp, "Ma | Tang | Loai | Rong | Cao | Van hanh", (0.0, y), height=0.16, layer="A-DOOR-IDEN")
+    y -= 0.38
+    for opening in project.openings:
+        _add_text(
+            msp,
+            f"{opening.label} | Tang {opening.floor} | {opening.kind} | {opening.width_m or 0:.2f} m | {opening.height_m or 0:.2f} m | {opening.operation or 'concept'}",
+            (0.0, y),
+            height=0.14,
+            layer="A-DOOR-IDEN" if opening.kind == "door" else "A-ANNO-TEXT",
+        )
+        y -= 0.32
+    _add_polyline(msp, [(-0.2, y + 0.12), (11.0, y + 0.12), (11.0, 9.75), (-0.2, 9.75)], layer="A-DOOR", closed=True)
+
+
+def _draw_assumptions_style_notes(msp, project: DrawingProject) -> None:
+    metadata = project.style_metadata or {}
+    _add_text(msp, "Gia dinh va ghi chu style", (0.0, 10.0), height=0.24, layer="A-ANNO-TEXT")
+    _add_text(msp, f"Style ID: {metadata.get('style_id') or project.style}", (0.0, 9.45), height=0.16, layer="A-ANNO-TEXT")
+    _add_text(msp, str(metadata.get("facade_strategy") or "Facade strategy follows concept style/profile."), (0.0, 9.08), height=0.14, layer="A-ANNO-TEXT")
+    y = 8.55
+    _add_text(msp, "Gia dinh concept:", (0.0, y), height=0.16, layer="A-ANNO-TEXT")
+    y -= 0.38
+    assumptions = tuple(metadata.get("assumptions") or ())
+    if not assumptions:
+        assumptions = ("No additional assumptions beyond the brief.",)
+    for index, assumption in enumerate(assumptions, start=1):
+        _add_text(msp, f"{index}. {assumption}", (0.0, y), height=0.14, layer="A-ANNO-TEXT")
+        y -= 0.34
+    _add_polyline(msp, [(-0.2, y + 0.12), (11.0, y + 0.12), (11.0, 10.25), (-0.2, 10.25)], layer="A-ANNO-TTLB", closed=True)
+
+
 def build_dxf_document(project: DrawingProject, sheet: SheetSpec):
     doc = _new_doc(project, sheet)
     msp = doc.modelspace()
-    if sheet.kind == "site":
+    if sheet.kind == "cover_index":
+        _draw_cover_index(msp, project)
+    elif sheet.kind == "site":
         _draw_site(msp, project)
     elif sheet.kind == "floorplan":
         if sheet.floor is None:
@@ -184,6 +246,12 @@ def build_dxf_document(project: DrawingProject, sheet: SheetSpec):
         _draw_elevations(msp, project)
     elif sheet.kind == "sections":
         _draw_sections(msp, project)
+    elif sheet.kind == "room_area_schedule":
+        _draw_room_area_schedule(msp, project)
+    elif sheet.kind == "door_window_schedule":
+        _draw_door_window_schedule(msp, project)
+    elif sheet.kind == "assumptions_style_notes":
+        _draw_assumptions_style_notes(msp, project)
     else:
         raise ValueError(f"Unsupported sheet kind {sheet.kind}")
     _draw_title_note(msp, project, sheet)

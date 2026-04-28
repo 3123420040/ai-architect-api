@@ -1,0 +1,49 @@
+{
+  "style_id": "indochine_soft",
+  "display_name": "Indochine mềm",
+  "version": "2026.04",
+  "aliases": ["indochine soft", "soft indochine", "indochine nhẹ", "đông dương nhẹ", "dong duong nhe"],
+  "customer_language_signals": ["indochine", "đông dương", "ấm sang", "cổ điển nhẹ", "mây tre", "gạch bông", "vòm nhẹ", "truyền thống nhưng nhẹ"],
+  "visual_signals": ["arched opening", "rattan", "pattern tile", "dark wood accent", "cream wall", "decorative screen", "colonial shutters"],
+  "spatial_rules": {
+    "primary_strategy": "calm symmetrical moments in key rooms with practical modern circulation",
+    "ventilation": "use shutters, high openings, and shaded balconies conceptually",
+    "green_zones": ["balcony planter", "entry planter", "small courtyard when available"],
+    "privacy": "soft screen layers and recessed openings"
+  },
+  "room_defaults": {
+    "living": {"feature_wall_or_arch": true, "loose_furniture_group": true},
+    "kitchen_dining": {"can_be_semi_open": true, "warm_material_focus": true},
+    "bedroom": {"calm_symmetry": true, "accent_headboard": true},
+    "prayer_room": {"quiet_upper_floor_position": true}
+  },
+  "opening_rules": {
+    "window_to_wall_ratio": "moderate_with_shutters_or_screens",
+    "door_style": "timber tone with simple panel rhythm",
+    "window_style": "rectangular or softly arched concept openings with shutters/screens",
+    "avoid": "heavy ornate detailing at concept scale"
+  },
+  "facade_rules": {
+    "massing": "simple volume with soft rhythm and shaded balcony",
+    "screening": "rattan/wood-inspired screen zones used sparingly",
+    "greenery": "small planted accents rather than dense tropical cover",
+    "expression": "warm, crafted, and restrained"
+  },
+  "material_palette": {
+    "base": ["cream plaster", "warm white", "soft beige"],
+    "accent": ["dark timber", "rattan texture", "pattern tile", "brass tone"],
+    "landscape": ["potted greenery", "balcony planter"],
+    "metal": ["aged bronze", "matte black"]
+  },
+  "drawing_rules": {
+    "plan_notes": ["mark semi-open kitchen/living relationships", "show feature arch/screen zones only where spatially relevant"],
+    "elevation_notes": ["show shutters/screens and balcony rhythm", "label material concept without detailed fabrication"],
+    "line_emphasis": "feature openings and screen zones should be legible but not overdrawn"
+  },
+  "avoid_rules": ["overly ornate facade", "copying heritage motifs without simplifying", "dark enclosed rooms", "moving apartment wet areas without verified constraints"],
+  "validation_rules": ["heritage-inspired notes must remain concept-level", "apartment renovation should preserve fixed shafts unless verified otherwise", "assumptions must stay concept-only"],
+  "explanation_templates": {
+    "style_summary": "Hướng Indochine mềm phù hợp khi gia chủ thích cảm giác ấm, có chất Á Đông nhưng không quá nặng chi tiết.",
+    "confirmation": "Em đang đề xuất Indochine nhẹ: tông kem ấm, gỗ/mây tre và vài điểm nhấn vòm hoặc màn chắn mềm."
+  }
+}

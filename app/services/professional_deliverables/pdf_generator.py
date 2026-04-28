@@ -143,6 +143,67 @@ def _text(c: canvas.Canvas, value: str, x: float, y: float, *, size: float = 8, 
     c.drawString(x, y, value)
 
 
+def _wrapped_lines(value: str, *, max_chars: int = 92) -> list[str]:
+    words = value.split()
+    lines: list[str] = []
+    current: list[str] = []
+    for word in words:
+        candidate = " ".join([*current, word])
+        if len(candidate) > max_chars and current:
+            lines.append(" ".join(current))
+            current = [word]
+        else:
+            current.append(word)
+    if current:
+        lines.append(" ".join(current))
+    return lines or [""]
+
+
+def _draw_text_lines(c: canvas.Canvas, lines: list[str] | tuple[str, ...], x: float, y: float, *, size: float = 8, leading: float = 13, bold: bool = False) -> float:
+    cursor = y
+    for line in lines:
+        _text(c, line, x, cursor, size=size, bold=bold)
+        cursor -= leading
+    return cursor
+
+
+def _draw_cover_index(c: canvas.Canvas, project: DrawingProject, sheets: tuple[SheetSpec, ...]) -> None:
+    x = MARGIN + 22
+    y = CONTENT_TOP - 12
+    _draw_text_lines(c, ["Professional Concept 2D Package", project.project_name], x, y, size=17, leading=24, bold=True)
+    y -= 68
+    _draw_text_lines(
+        c,
+        [
+            project.concept_note,
+            f"Quy mô concept: {format_compact_m(project.lot_width_m)} m x {format_compact_m(project.lot_depth_m)} m, {project.storeys} tầng",
+            f"Phong cách định hướng: {project.style}",
+        ],
+        x,
+        y,
+        size=9,
+        leading=16,
+    )
+    y -= 92
+    _text(c, "Mục lục bản vẽ", x, y, size=12, bold=True)
+    y -= 22
+    for sheet in sheets:
+        _text(c, sheet.number, x, y, size=8, bold=True)
+        _text(c, sheet.title, x + 78, y, size=8)
+        y -= 15
+    y -= 20
+    _text(c, "Phạm vi", x, y, size=12, bold=True)
+    y -= 18
+    scope_lines = [
+        "Hồ sơ dùng để trao đổi phương án concept/schematic với khách hàng.",
+        "Không dùng cho thi công, xin phép, kết cấu, MEP, địa kỹ thuật, pháp lý hoặc xác nhận tuân thủ địa phương.",
+    ]
+    for line in scope_lines:
+        for wrapped in _wrapped_lines(line, max_chars=108):
+            _text(c, wrapped, x, y, size=8)
+            y -= 13
+
+
 def _draw_dimensions(c: canvas.Canvas, project: DrawingProject, tx: Callable[[float, float], tuple[float, float]]) -> None:
     c.setStrokeColor(colors.red)
     c.setLineWidth(0.7)
@@ -288,6 +349,92 @@ def _draw_sections(c: canvas.Canvas, project: DrawingProject) -> None:
         _text(c, label, x0, y0 + height * scale + 10, size=8, bold=True)
 
 
+def _draw_room_area_schedule(c: canvas.Canvas, project: DrawingProject) -> None:
+    x = MARGIN + 22
+    y = CONTENT_TOP - 16
+    headers = ("Tầng", "Phòng", "Loại", "Diện tích")
+    widths = (52, 210, 140, 78)
+    _draw_table_header(c, headers, widths, x, y)
+    y -= 22
+    for room in project.rooms:
+        if y < CONTENT_BOTTOM + 28:
+            break
+        values = (f"Tầng {room.floor}", room.name, room.original_type or room.category or "-", f"{room.display_area_m2:.1f} m²")
+        _draw_table_row(c, values, widths, x, y)
+        y -= 18
+
+
+def _draw_door_window_schedule(c: canvas.Canvas, project: DrawingProject) -> None:
+    x = MARGIN + 22
+    y = CONTENT_TOP - 16
+    headers = ("Mã", "Tầng", "Loại", "Rộng", "Cao", "Vận hành")
+    widths = (92, 52, 86, 64, 64, 150)
+    _draw_table_header(c, headers, widths, x, y)
+    y -= 22
+    for opening in project.openings:
+        if y < CONTENT_BOTTOM + 28:
+            break
+        values = (
+            opening.label,
+            f"Tầng {opening.floor}",
+            "Cửa sổ" if opening.kind == "window" else "Cửa đi",
+            f"{opening.width_m:.2f} m" if opening.width_m else "-",
+            f"{opening.height_m:.2f} m" if opening.height_m else "-",
+            opening.operation or "concept",
+        )
+        _draw_table_row(c, values, widths, x, y)
+        y -= 18
+
+
+def _draw_assumptions_style_notes(c: canvas.Canvas, project: DrawingProject) -> None:
+    metadata = project.style_metadata or {}
+    x = MARGIN + 22
+    y = CONTENT_TOP - 16
+    _text(c, "Ghi chú style", x, y, size=12, bold=True)
+    y -= 20
+    style_lines = [
+        f"Style ID: {metadata.get('style_id') or project.style}",
+        str(metadata.get("facade_strategy") or "Mặt tiền concept lấy từ style/profile và layout sơ bộ."),
+    ]
+    for line in style_lines:
+        for wrapped in _wrapped_lines(line, max_chars=108):
+            _text(c, wrapped, x, y, size=8)
+            y -= 13
+    y -= 16
+    _text(c, "Giả định concept", x, y, size=12, bold=True)
+    y -= 20
+    assumptions = tuple(metadata.get("assumptions") or ())
+    if not assumptions:
+        assumptions = ("Chưa có giả định bổ sung ngoài thông tin brief.",)
+    for index, assumption in enumerate(assumptions, start=1):
+        if y < CONTENT_BOTTOM + 24:
+            break
+        for line_index, wrapped in enumerate(_wrapped_lines(str(assumption), max_chars=104)):
+            prefix = f"{index}. " if line_index == 0 else "   "
+            _text(c, prefix + wrapped, x, y, size=8)
+            y -= 13
+
+
+def _draw_table_header(c: canvas.Canvas, headers: tuple[str, ...], widths: tuple[float, ...], x: float, y: float) -> None:
+    c.setStrokeColor(colors.black)
+    c.setLineWidth(0.8)
+    cursor = x
+    for header, width in zip(headers, widths):
+        c.rect(cursor, y - 6, width, 18, stroke=1, fill=0)
+        _text(c, header, cursor + 4, y, size=7.5, bold=True)
+        cursor += width
+
+
+def _draw_table_row(c: canvas.Canvas, values: tuple[str, ...], widths: tuple[float, ...], x: float, y: float) -> None:
+    c.setStrokeColor(colors.gray)
+    c.setLineWidth(0.4)
+    cursor = x
+    for value, width in zip(values, widths):
+        c.rect(cursor, y - 6, width, 18, stroke=1, fill=0)
+        _text(c, str(value)[:42], cursor + 4, y, size=7)
+        cursor += width
+
+
 def write_pdf_bundle(project: DrawingProject, sheets: tuple[SheetSpec, ...], output_path: Path) -> Path:
     register_fonts()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -301,7 +448,9 @@ def write_pdf_bundle(project: DrawingProject, sheets: tuple[SheetSpec, ...], out
         _draw_title_block(c, project, sheet, scale_label=effective_scale_label(project))
         _set_font(c, 16, bold=True)
         c.drawString(MARGIN, PAGE_SIZE[1] - MARGIN - 4, f"{sheet.number} - {sheet.title}")
-        if sheet.kind == "site":
+        if sheet.kind == "cover_index":
+            _draw_cover_index(c, project, sheets)
+        elif sheet.kind == "site":
             _draw_site(c, project)
         elif sheet.kind == "floorplan":
             _draw_floorplan(c, project, sheet)
@@ -309,6 +458,12 @@ def write_pdf_bundle(project: DrawingProject, sheets: tuple[SheetSpec, ...], out
             _draw_elevations(c, project)
         elif sheet.kind == "sections":
             _draw_sections(c, project)
+        elif sheet.kind == "room_area_schedule":
+            _draw_room_area_schedule(c, project)
+        elif sheet.kind == "door_window_schedule":
+            _draw_door_window_schedule(c, project)
+        elif sheet.kind == "assumptions_style_notes":
+            _draw_assumptions_style_notes(c, project)
         c.showPage()
     c.save()
     return output_path

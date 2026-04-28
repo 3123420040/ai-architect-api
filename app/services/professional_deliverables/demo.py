@@ -102,10 +102,11 @@ def generate_project_2d_bundle(
     *,
     require_dwg: bool | None = None,
     project_dir: Path | None = None,
+    sheets: tuple | None = None,
 ) -> Sprint1BundleResult:
     if require_dwg is None:
         require_dwg = bool(os.environ.get("CI"))
-    sheets = assemble_sheet_set(project)
+    sheets = sheets or assemble_sheet_set(project)
     project_dir = project_dir or (output_root / f"project-{project.project_id}")
     two_d_dir = project_dir / "2d"
     if two_d_dir.exists():

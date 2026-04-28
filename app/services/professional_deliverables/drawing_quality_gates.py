@@ -66,12 +66,12 @@ def validate_pdf_no_stale_golden_labels(path: Path, project: DrawingProject) -> 
 
 
 def validate_pdf_floor_count(path: Path, project: DrawingProject) -> GateResult:
-    expected = project.storeys + 3
+    minimum = project.storeys + 3
     with fitz.open(path) as doc:
         count = doc.page_count
-    if count != expected:
-        return GateResult("PDF_FLOOR_COUNT", "fail", f"expected {project.storeys} floor plan sheets plus site/elevation/section, found {count} pages")
-    return GateResult("PDF_FLOOR_COUNT", "pass", f"{project.storeys} floor plan sheets represented")
+    if count < minimum:
+        return GateResult("PDF_FLOOR_COUNT", "fail", f"expected at least {project.storeys} floor plan sheets plus site/elevation/section, found {count} pages")
+    return GateResult("PDF_FLOOR_COUNT", "pass", f"{project.storeys} floor plan sheets represented in {count} PDF pages")
 
 
 def validate_pdf_room_labels_areas(path: Path, project: DrawingProject) -> GateResult:

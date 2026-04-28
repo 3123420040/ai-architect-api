@@ -100,7 +100,16 @@ class SheetSpec:
     number: str
     title: str
     filename_stem: str
-    kind: Literal["site", "floorplan", "elevations", "sections"]
+    kind: Literal[
+        "cover_index",
+        "site",
+        "floorplan",
+        "elevations",
+        "sections",
+        "room_area_schedule",
+        "door_window_schedule",
+        "assumptions_style_notes",
+    ]
     floor: int | None = None
     scale: str = "1:100"
 

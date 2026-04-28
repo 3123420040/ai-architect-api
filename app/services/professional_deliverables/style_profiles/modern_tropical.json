@@ -1,0 +1,49 @@
+{
+  "style_id": "modern_tropical",
+  "display_name": "Hiện đại nhiệt đới",
+  "version": "2026.04",
+  "aliases": ["modern tropical", "tropical modern", "hiện đại nhiệt đới", "hiện đại xanh mát", "hien dai thoang nhieu cay"],
+  "customer_language_signals": ["thoáng", "nhiều cây", "xanh mát", "gần gũi tự nhiên", "nhiều ánh sáng", "thông gió", "mát", "hien dai", "nhiet doi"],
+  "visual_signals": ["wood louvers", "vertical screens", "deep overhang", "balcony greenery", "large shaded glass", "courtyard planting", "natural stone"],
+  "spatial_rules": {
+    "primary_strategy": "public-to-private sequence with a planted lightwell or courtyard as the breathing core",
+    "ventilation": "prefer cross ventilation through front/back openings and lightwell windows",
+    "green_zones": ["front planter", "central lightwell", "balcony planter", "roof terrace garden"],
+    "privacy": "filter street views with screens, planting, and recessed glazing"
+  },
+  "room_defaults": {
+    "living": {"front_or_near_front": true, "connects_to_green_zone": true},
+    "kitchen_dining": {"can_be_open": true, "near_rear_service": true},
+    "bedroom": {"prefer_window_to_lightwell_or_exterior": true},
+    "elder_room": {"prefer_lower_floor": true}
+  },
+  "opening_rules": {
+    "window_to_wall_ratio": "moderate_high_with_shading",
+    "door_style": "simple full-height or timber-accent door",
+    "window_style": "large openings protected by overhangs, louvers, or balcony planting",
+    "avoid": "large unshaded west-facing glass"
+  },
+  "facade_rules": {
+    "massing": "clean stacked volumes with recessed balconies",
+    "screening": "vertical fins or timber-look louvers where privacy/sun control matters",
+    "greenery": "visible planters on balcony and roof terrace",
+    "expression": "light, airy, and shaded rather than sealed"
+  },
+  "material_palette": {
+    "base": ["warm white render", "light grey render"],
+    "accent": ["timber-look slats", "natural stone", "terracotta texture"],
+    "landscape": ["tropical planting", "planter boxes"],
+    "metal": ["matte black", "dark bronze"]
+  },
+  "drawing_rules": {
+    "plan_notes": ["show lightwell/green zones clearly", "mark shaded openings", "label ventilation intent"],
+    "elevation_notes": ["show planter depth", "show screen/louver zones", "avoid decorative detail beyond concept"],
+    "line_emphasis": "green zones and shaded openings should be readable at concept scale"
+  },
+  "avoid_rules": ["sealed facade with no planted or shaded zones", "dark heavy interiors without daylight strategy", "oversized unshaded glazing"],
+  "validation_rules": ["at least one green/lightwell strategy should be present for townhouse lots", "major bedrooms should have exterior or lightwell access where possible", "assumptions must stay concept-only"],
+  "explanation_templates": {
+    "style_summary": "Hướng hiện đại nhiệt đới phù hợp vì ưu tiên không gian thoáng, nhiều cây và ánh sáng tự nhiên.",
+    "confirmation": "Em đang đề xuất hướng hiện đại xanh mát, dùng giếng trời/cây xanh và mặt tiền có lớp che nắng."
+  }
+}

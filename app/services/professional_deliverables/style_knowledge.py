@@ -1,0 +1,181 @@
+from __future__ import annotations
+
+import json
+import unicodedata
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+
+class StyleKnowledgeError(ValueError):
+    pass
+
+
+PROFILE_DIR = Path(__file__).with_name("style_profiles")
+
+REQUIRED_PROFILE_FIELDS = (
+    "style_id",
+    "display_name",
+    "version",
+    "aliases",
+    "customer_language_signals",
+    "visual_signals",
+    "spatial_rules",
+    "room_defaults",
+    "opening_rules",
+    "facade_rules",
+    "material_palette",
+    "drawing_rules",
+    "avoid_rules",
+    "validation_rules",
+    "explanation_templates",
+)
+
+UNSAFE_SCOPE_TERMS = (
+    "issued " + "for construction",
+    "permit " + "approved",
+    "structural " + "design",
+    "mep " + "design",
+    "code " + "compliant",
+    "construction " + "ready",
+)
+
+
+def normalize_signal(value: str) -> str:
+    normalized = unicodedata.normalize("NFD", value.lower()).replace("đ", "d")
+    without_marks = "".join(character for character in normalized if unicodedata.category(character) != "Mn")
+    return " ".join(without_marks.replace("-", " ").replace("_", " ").split())
+
+
+def _require_non_empty_sequence(payload: dict[str, Any], field_name: str) -> tuple[str, ...]:
+    value = payload.get(field_name)
+    if not isinstance(value, list) or not value:
+        raise StyleKnowledgeError(f"Style profile {payload.get('style_id') or '<unknown>'} missing {field_name}")
+    return tuple(str(item) for item in value if str(item).strip())
+
+
+def _require_mapping(payload: dict[str, Any], field_name: str) -> dict[str, Any]:
+    value = payload.get(field_name)
+    if not isinstance(value, dict) or not value:
+        raise StyleKnowledgeError(f"Style profile {payload.get('style_id') or '<unknown>'} missing {field_name}")
+    return dict(value)
+
+
+def _assert_safe_scope(payload: dict[str, Any]) -> None:
+    searchable = normalize_signal(json.dumps(payload, ensure_ascii=False))
+    for term in UNSAFE_SCOPE_TERMS:
+        if normalize_signal(term) in searchable:
+            raise StyleKnowledgeError(f"Style profile {payload.get('style_id')} contains unsafe scope claim: {term}")
+
+
+@dataclass(frozen=True)
+class StyleProfile:
+    style_id: str
+    display_name: str
+    version: str
+    aliases: tuple[str, ...]
+    customer_language_signals: tuple[str, ...]
+    visual_signals: tuple[str, ...]
+    spatial_rules: dict[str, Any]
+    room_defaults: dict[str, Any]
+    opening_rules: dict[str, Any]
+    facade_rules: dict[str, Any]
+    material_palette: dict[str, Any]
+    drawing_rules: dict[str, Any]
+    avoid_rules: tuple[str, ...]
+    validation_rules: tuple[str, ...]
+    explanation_templates: dict[str, str]
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> StyleProfile:
+        missing = [field for field in REQUIRED_PROFILE_FIELDS if field not in payload]
+        if missing:
+            raise StyleKnowledgeError(f"Style profile missing required fields: {', '.join(missing)}")
+        _assert_safe_scope(payload)
+        templates = _require_mapping(payload, "explanation_templates")
+        return cls(
+            style_id=str(payload["style_id"]),
+            display_name=str(payload["display_name"]),
+            version=str(payload["version"]),
+            aliases=_require_non_empty_sequence(payload, "aliases"),
+            customer_language_signals=_require_non_empty_sequence(payload, "customer_language_signals"),
+            visual_signals=_require_non_empty_sequence(payload, "visual_signals"),
+            spatial_rules=_require_mapping(payload, "spatial_rules"),
+            room_defaults=_require_mapping(payload, "room_defaults"),
+            opening_rules=_require_mapping(payload, "opening_rules"),
+            facade_rules=_require_mapping(payload, "facade_rules"),
+            material_palette=_require_mapping(payload, "material_palette"),
+            drawing_rules=_require_mapping(payload, "drawing_rules"),
+            avoid_rules=_require_non_empty_sequence(payload, "avoid_rules"),
+            validation_rules=_require_non_empty_sequence(payload, "validation_rules"),
+            explanation_templates={str(key): str(value) for key, value in templates.items()},
+        )
+
+    @property
+    def normalized_aliases(self) -> tuple[str, ...]:
+        return tuple(normalize_signal(alias) for alias in self.aliases)
+
+    @property
+    def normalized_customer_signals(self) -> tuple[str, ...]:
+        return tuple(normalize_signal(signal) for signal in self.customer_language_signals)
+
+    @property
+    def normalized_visual_signals(self) -> tuple[str, ...]:
+        return tuple(normalize_signal(signal) for signal in self.visual_signals)
+
+    def matches_identifier(self, value: str) -> bool:
+        normalized = normalize_signal(value)
+        return normalized == normalize_signal(self.style_id) or normalized in self.normalized_aliases
+
+    def customer_explanation(self, key: str = "style_summary") -> str:
+        return self.explanation_templates.get(key) or self.explanation_templates.get("style_summary") or self.display_name
+
+
+def load_style_profiles(profile_dir: Path | None = None) -> dict[str, StyleProfile]:
+    directory = profile_dir or PROFILE_DIR
+    if not directory.exists():
+        raise StyleKnowledgeError(f"Style profile directory does not exist: {directory}")
+    profiles: dict[str, StyleProfile] = {}
+    for path in sorted(directory.glob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        profile = StyleProfile.from_dict(payload)
+        if profile.style_id in profiles:
+            raise StyleKnowledgeError(f"Duplicate style profile id: {profile.style_id}")
+        profiles[profile.style_id] = profile
+    if not profiles:
+        raise StyleKnowledgeError("No style profiles found")
+    return profiles
+
+
+class StyleKnowledgeBase:
+    def __init__(self, profiles: dict[str, StyleProfile] | None = None) -> None:
+        self.profiles = profiles or load_style_profiles()
+
+    @classmethod
+    def load_default(cls) -> StyleKnowledgeBase:
+        return cls(load_style_profiles())
+
+    def get(self, style_id_or_alias: str) -> StyleProfile:
+        for profile in self.profiles.values():
+            if profile.matches_identifier(style_id_or_alias):
+                return profile
+        raise StyleKnowledgeError(f"Unknown style profile: {style_id_or_alias}")
+
+    def all(self) -> tuple[StyleProfile, ...]:
+        return tuple(self.profiles[style_id] for style_id in sorted(self.profiles))
+
+    def score_profile(self, profile: StyleProfile, *, text_signals: list[str] | tuple[str, ...], visual_signals: list[str] | tuple[str, ...] = ()) -> tuple[float, tuple[str, ...]]:
+        normalized_text = [normalize_signal(signal) for signal in text_signals if signal]
+        normalized_visual = [normalize_signal(signal) for signal in visual_signals if signal]
+        evidence: list[str] = []
+        score = 0.0
+
+        for signal in profile.normalized_customer_signals + profile.normalized_aliases:
+            if any(signal in text for text in normalized_text):
+                score += 2.0
+                evidence.append(signal)
+        for signal in profile.normalized_visual_signals:
+            if any(signal in visual for visual in normalized_visual):
+                score += 1.4
+                evidence.append(signal)
+        return score, tuple(dict.fromkeys(evidence))

@@ -36,7 +36,12 @@ RUN ln -sf /usr/bin/python3.12 /usr/local/bin/python \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN /app/.venv/bin/pip install --no-cache-dir -r requirements.txt
+RUN /app/.venv/bin/pip install --no-cache-dir -r requirements.txt \
+    && /app/.venv/bin/pip install --no-cache-dir usd-core==26.5 \
+    && rm -f /usr/local/bin/python /usr/local/bin/pip \
+    && printf '#!/bin/sh\nexec /app/.venv/bin/python "$@"\n' > /usr/local/bin/python \
+    && printf '#!/bin/sh\nexec /app/.venv/bin/pip "$@"\n' > /usr/local/bin/pip \
+    && chmod +x /usr/local/bin/python /usr/local/bin/pip
 
 COPY app ./app
 COPY alembic ./alembic

@@ -271,6 +271,9 @@ class ProfessionalDeliverableAssetSummary(BaseModel):
     asset_role: str | None = None
     content_type: str | None = None
     byte_size: int = 0
+    status: str = "ready"
+    skip_reason: str | None = None
+    validation_error: str | None = None
 
 
 class ProfessionalDeliverableBundleOut(BaseModel):
@@ -280,6 +283,12 @@ class ProfessionalDeliverableBundleOut(BaseModel):
     quality_status: str
     is_degraded: bool = False
     degraded_reasons: list[str] = Field(default_factory=list)
+    failed_gates: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    missing_artifacts: list[str] = Field(default_factory=list)
+    retryable: bool = False
+    user_message: str | None = None
+    technical_details: dict = Field(default_factory=dict)
     assets: list[ProfessionalDeliverableAssetSummary] = Field(default_factory=list)
     current_job: ProfessionalDeliverableJobOut | None = None
     updated_at: datetime

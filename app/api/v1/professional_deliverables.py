@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user, require_roles
-from app.models import DesignVersion, Project, User
+from app.models import DesignVersion, ProfessionalDeliverableJob, Project, User
 from app.schemas import (
     ProfessionalDeliverableBundleOut,
     ProfessionalDeliverableJobCreateRequest,
@@ -103,12 +103,18 @@ def retry_professional_deliverable_job(
     if job.status != "failed":
         raise HTTPException(status_code=409, detail="Only failed professional deliverable jobs can be retried")
 
-    job.status = "queued"
-    job.stage = "queued"
-    job.progress_percent = 0
-    job.error_code = None
-    job.error_message = None
+    retry_job = ProfessionalDeliverableJob(
+        bundle_id=bundle.id,
+        job_type=job.job_type,
+        status="queued",
+        stage="queued",
+        progress_percent=0,
+        attempt_count=job.attempt_count,
+    )
+    db.add(retry_job)
     bundle.status = "queued"
+    bundle.quality_status = "pending"
+    bundle.user_message = "Professional deliverables retry queued."
     db.commit()
-    queue_professional_bundle_job(job.id)
-    return ProfessionalDeliverableJobOut(**serialize_job(job))
+    queue_professional_bundle_job(retry_job.id)
+    return ProfessionalDeliverableJobOut(**serialize_job(retry_job))

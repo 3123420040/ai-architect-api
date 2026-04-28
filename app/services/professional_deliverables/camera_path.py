@@ -70,6 +70,63 @@ def camera_collision_warnings(scene: SceneContract, keyframes: tuple[CameraKeyfr
     return tuple(warnings)
 
 
+def _keyframe_collides(scene: SceneContract, keyframe: CameraKeyframe) -> bool:
+    return bool(camera_collision_warnings(scene, (keyframe,)))
+
+
+def _safe_keyframe(
+    scene: SceneContract,
+    keyframe: CameraKeyframe,
+    *,
+    min_x: float,
+    min_y: float,
+    max_x: float,
+    max_y: float,
+) -> CameraKeyframe:
+    if not _keyframe_collides(scene, keyframe):
+        return keyframe
+
+    x, y, z = keyframe.position_m
+    target_x, target_y, target_z = keyframe.target_m
+    width = max_x - min_x
+    depth = max_y - min_y
+    center_x = (min_x + max_x) / 2.0
+    center_y = (min_y + max_y) / 2.0
+    candidate_xs = (
+        x,
+        center_x - width * 0.28,
+        center_x + width * 0.28,
+        min_x + min(1.2, width * 0.2),
+        max_x - min(1.2, width * 0.2),
+        center_x,
+    )
+    candidate_ys = (
+        y,
+        min(max_y - 0.8, y + 1.0),
+        max(min_y + 0.8, y - 1.0),
+        center_y,
+        min_y + depth * 0.3,
+        min_y + depth * 0.6,
+    )
+
+    for candidate_y in candidate_ys:
+        for candidate_x in candidate_xs:
+            if not (min_x + 0.45 <= candidate_x <= max_x - 0.45 and min_y + 0.45 <= candidate_y <= max_y - 0.45):
+                continue
+            dx = candidate_x - x
+            dy = candidate_y - y
+            candidate = CameraKeyframe(
+                time_s=keyframe.time_s,
+                label=keyframe.label,
+                position_m=(candidate_x, candidate_y, z),
+                target_m=(target_x + dx, target_y + dy, target_z),
+                focal_length_mm=keyframe.focal_length_mm,
+            )
+            if not _keyframe_collides(scene, candidate):
+                return candidate
+    return keyframe
+
+
 def build_camera_path(scene: SceneContract, *, fps: int = 30) -> CameraPath:
     min_x, min_y, _min_z, max_x, max_y, max_z = _scene_bounds(scene)
     center_x = (min_x + max_x) / 2.0
@@ -79,7 +136,7 @@ def build_camera_path(scene: SceneContract, *, fps: int = 30) -> CameraPath:
     eye = 1.55
     f2_z = 3.2 + eye
 
-    keyframes = (
+    initial_keyframes = (
         CameraKeyframe(
             time_s=0.0,
             label="Exterior approach",
@@ -122,6 +179,10 @@ def build_camera_path(scene: SceneContract, *, fps: int = 30) -> CameraPath:
             target_m=(center_x, center_y, max_z * 0.5),
             focal_length_mm=35.0,
         ),
+    )
+    keyframes = tuple(
+        _safe_keyframe(scene, keyframe, min_x=min_x, min_y=min_y, max_x=max_x, max_y=max_y)
+        for keyframe in initial_keyframes
     )
     return CameraPath(
         duration_s=60.0,

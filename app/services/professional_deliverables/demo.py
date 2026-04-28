@@ -9,6 +9,29 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
+from app.services.professional_deliverables.artifact_quality_report import (
+    build_2d_artifact_readiness,
+    write_artifact_quality_report,
+)
+from app.services.professional_deliverables.drawing_quality_gates import (
+    validate_dxf_dimensions_match,
+    validate_dxf_no_stale_golden_labels,
+    validate_dxf_openable,
+    validate_dxf_project_extents_match,
+    validate_dxf_required_layers,
+    validate_dxf_room_labels_openings,
+    validate_dxf_units_meters,
+    validate_pdf_dimension_chains,
+    validate_pdf_dynamic_dimensions,
+    validate_pdf_elevation_layout,
+    validate_pdf_floor_count,
+    validate_pdf_no_stale_golden_labels,
+    validate_pdf_no_title_overlap,
+    validate_pdf_page_count,
+    validate_pdf_page_render_nonblank,
+    validate_pdf_room_labels_areas,
+    validate_pdf_site_boundary_match,
+)
 from app.services.professional_deliverables.drawing_contract import DrawingProject
 from app.services.professional_deliverables.dwg_converter import ODAConverterError, convert_dxf_directory_to_dwg
 from app.services.professional_deliverables.dxf_exporter import write_dxf_sheets
@@ -38,6 +61,8 @@ class Sprint1BundleResult:
     gate_results: tuple[GateResult, ...]
     gate_summary_json: Path
     gate_summary_md: Path
+    artifact_quality_report_json: Path | None = None
+    artifact_quality_report_md: Path | None = None
 
     @property
     def passed(self) -> bool:
@@ -54,6 +79,8 @@ class Sprint1BundleResult:
             "gates": [result.as_dict() for result in self.gate_results],
             "gate_summary_json": str(self.gate_summary_json),
             "gate_summary_md": str(self.gate_summary_md),
+            "artifact_quality_report_json": str(self.artifact_quality_report_json) if self.artifact_quality_report_json else None,
+            "artifact_quality_report_md": str(self.artifact_quality_report_md) if self.artifact_quality_report_md else None,
         }
 
 
@@ -109,6 +136,7 @@ def generate_project_2d_bundle(
 
     audit_dir = two_d_dir / ".audit-dxf"
     dwg_gate = dwg_gate_override or validate_dwg_clean_open(two_d_dir, audit_dir, require_dwg=require_dwg)
+    site_dxf_path = next((path for path in dxf_paths if path.name.startswith("A-100")), dxf_paths[0])
     gate_results = [
         dwg_gate,
         validate_all_dxf_layers(list(dxf_paths)),
@@ -116,10 +144,42 @@ def generate_project_2d_bundle(
         validate_pdf_font_embedding(pdf_path),
         validate_pdf_scale(pdf_path),
         validate_pdf_size(pdf_path),
+        validate_pdf_page_count(pdf_path, len(sheets)),
+        validate_pdf_dynamic_dimensions(pdf_path, project),
+        validate_pdf_no_stale_golden_labels(pdf_path, project),
+        validate_pdf_site_boundary_match(project),
+        validate_pdf_floor_count(pdf_path, project),
+        validate_pdf_room_labels_areas(pdf_path, project),
+        validate_pdf_dimension_chains(pdf_path, project),
+        validate_pdf_no_title_overlap(project),
+        validate_pdf_page_render_nonblank(pdf_path),
+        validate_pdf_elevation_layout(project),
+        validate_dxf_openable(site_dxf_path),
+        validate_dxf_units_meters(site_dxf_path),
+        validate_dxf_required_layers(site_dxf_path),
+        validate_dxf_project_extents_match(site_dxf_path, project),
+        validate_dxf_dimensions_match(site_dxf_path, project),
+        validate_dxf_room_labels_openings(dxf_paths, project),
+        validate_dxf_no_stale_golden_labels(dxf_paths, project),
     ]
     if audit_dir.exists():
         shutil.rmtree(audit_dir)
-    inventory = build_file_inventory([*dxf_paths, *dwg_paths, pdf_path], project_dir)
+    readiness = build_2d_artifact_readiness(
+        pdf_path=pdf_path,
+        dxf_paths=dxf_paths,
+        dwg_paths=dwg_paths,
+        gate_results=tuple(gate_results),
+        dwg_skip_reason=dwg_gate.detail if dwg_gate.status == "skipped" else None,
+    )
+    artifact_quality_report_json, artifact_quality_report_md = write_artifact_quality_report(
+        output_dir=two_d_dir,
+        project_id=project.project_id,
+        version_id=project.version_id,
+        bundle_id=None,
+        readiness=readiness,
+        root=project_dir,
+    )
+    inventory = build_file_inventory([*dxf_paths, *dwg_paths, pdf_path, artifact_quality_report_json, artifact_quality_report_md], project_dir)
     summary_json, summary_md = write_gate_outputs(two_d_dir, gate_results, inventory)
     return Sprint1BundleResult(
         project_dir=project_dir,
@@ -130,6 +190,8 @@ def generate_project_2d_bundle(
         gate_results=tuple(gate_results),
         gate_summary_json=summary_json,
         gate_summary_md=summary_md,
+        artifact_quality_report_json=artifact_quality_report_json,
+        artifact_quality_report_md=artifact_quality_report_md,
     )
 
 

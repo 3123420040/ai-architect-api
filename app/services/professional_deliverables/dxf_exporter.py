@@ -7,6 +7,7 @@ import ezdxf
 
 from app.services.professional_deliverables.aia_layers import apply_aia_layers
 from app.services.professional_deliverables.drawing_contract import DrawingProject, Fixture, Opening, SheetSpec
+from app.services.professional_deliverables.pdf_generator import format_compact_m, format_dimension_m
 
 
 def _new_doc(project: DrawingProject, sheet: SheetSpec):
@@ -27,25 +28,31 @@ def _add_polyline(msp, points, *, layer: str, closed: bool = False) -> None:
 
 
 def _draw_title_note(msp, project: DrawingProject, sheet: SheetSpec) -> None:
-    _add_polyline(msp, [(-1.4, -2.0), (6.4, -2.0), (6.4, -0.8), (-1.4, -0.8)], layer="A-ANNO-TTLB", closed=True)
+    title_width = max(project.lot_width_m, 7.8)
+    _add_polyline(msp, [(-1.4, -2.0), (-1.4 + title_width, -2.0), (-1.4 + title_width, -0.8), (-1.4, -0.8)], layer="A-ANNO-TTLB", closed=True)
     _add_text(msp, project.project_name, (-1.2, -1.2), height=0.18, layer="A-ANNO-TTLB")
     _add_text(msp, f"{sheet.number} - {sheet.title}", (-1.2, -1.55), height=0.16, layer="A-ANNO-TTLB")
-    _add_text(msp, f"Tỷ lệ {sheet.scale} | Ngày {project.issue_date.isoformat()} | Ô dấu KTS", (2.4, -1.55), height=0.14, layer="A-ANNO-TTLB")
+    _add_text(msp, f"Tỷ lệ {sheet.scale} | Ngày {project.issue_date.isoformat()} | {project.concept_note}", (2.4, -1.55), height=0.14, layer="A-ANNO-TTLB")
 
 
 def _draw_dimensions(msp, project: DrawingProject, *, x_offset: float = 0.0, y_offset: float = 0.0) -> None:
     width = project.lot_width_m
     depth = project.lot_depth_m
     _add_polyline(msp, [(x_offset, y_offset - 0.45), (x_offset + width, y_offset - 0.45)], layer="A-ANNO-DIMS")
-    _add_text(msp, "5.00 m", (x_offset + width / 2 - 0.35, y_offset - 0.75), height=0.18, layer="A-ANNO-DIMS")
+    _add_text(msp, format_dimension_m(width), (x_offset + width / 2 - 0.35, y_offset - 0.75), height=0.18, layer="A-ANNO-DIMS")
     _add_polyline(msp, [(x_offset - 0.45, y_offset), (x_offset - 0.45, y_offset + depth)], layer="A-ANNO-DIMS")
-    _add_text(msp, "15.00 m", (x_offset - 1.15, y_offset + depth / 2), height=0.18, layer="A-ANNO-DIMS")
+    _add_text(msp, format_dimension_m(depth), (x_offset - 1.15, y_offset + depth / 2), height=0.18, layer="A-ANNO-DIMS")
 
 
-def _draw_north_arrow(msp, base: tuple[float, float]) -> None:
+def _draw_north_arrow(msp, base: tuple[float, float], angle_degrees: float) -> None:
     x, y = base
-    _add_polyline(msp, [(x, y), (x + 0.25, y + 0.8), (x + 0.5, y), (x, y)], layer="A-ANNO-NORTH")
-    _add_text(msp, "B", (x + 0.18, y + 0.95), height=0.2, layer="A-ANNO-NORTH")
+    angle = math.radians(-angle_degrees)
+    local = [(-0.25, -0.4), (0.0, 0.4), (0.25, -0.4), (-0.25, -0.4)]
+    rotated = []
+    for px, py in local:
+        rotated.append((x + px * math.cos(angle) - py * math.sin(angle), y + px * math.sin(angle) + py * math.cos(angle)))
+    _add_polyline(msp, rotated, layer="A-ANNO-NORTH")
+    _add_text(msp, f"B {angle_degrees:.0f}°", (x - 0.18, y + 0.62), height=0.2, layer="A-ANNO-NORTH")
 
 
 def _fixture_layer(fixture: Fixture) -> str:
@@ -90,32 +97,49 @@ def _draw_opening(msp, opening: Opening) -> None:
 
 
 def _draw_floorplan(msp, project: DrawingProject, floor: int) -> None:
-    _add_polyline(msp, [(0, 0), (project.lot_width_m, 0), (project.lot_width_m, project.lot_depth_m), (0, project.lot_depth_m)], layer="A-WALL", closed=True)
+    _add_polyline(msp, project.site_polygon, layer="A-WALL", closed=True)
     for wall in project.walls_for_floor(floor):
         _add_polyline(msp, [wall.start, wall.end], layer=wall.layer)
     for room in project.rooms_for_floor(floor):
         _add_polyline(msp, room.polygon, layer="A-AREA", closed=True)
         _add_text(msp, room.name, room.center, height=0.18, layer="A-AREA-IDEN")
+        _add_text(msp, f"{room.display_area_m2:.1f} m²", (room.center[0], room.center[1] - 0.28), height=0.14, layer="A-AREA-IDEN")
     for opening in project.openings_for_floor(floor):
         _draw_opening(msp, opening)
     for fixture in project.fixtures_for_floor(floor):
         _draw_fixture(msp, fixture)
-    for x, y in ((0.25, 0.25), (4.75, 0.25), (0.25, 14.75), (4.75, 14.75)):
+    for x, y in (
+        (0.25, 0.25),
+        (max(project.lot_width_m - 0.25, 0.25), 0.25),
+        (0.25, max(project.lot_depth_m - 0.25, 0.25)),
+        (max(project.lot_width_m - 0.25, 0.25), max(project.lot_depth_m - 0.25, 0.25)),
+    ):
         _add_polyline(msp, [(x - 0.12, y - 0.12), (x + 0.12, y - 0.12), (x + 0.12, y + 0.12), (x - 0.12, y + 0.12)], layer="S-COLS", closed=True)
-    _add_polyline(msp, [(0.1, 8.25), (2.0, 10.75)], layer="A-ANNO-NPLT")
+    _add_polyline(msp, [(0.1, project.lot_depth_m * 0.55), (min(2.0, project.lot_width_m * 0.45), project.lot_depth_m * 0.72)], layer="A-ANNO-NPLT")
     _draw_dimensions(msp, project)
-    _draw_north_arrow(msp, (5.65, 13.5))
+    _draw_north_arrow(msp, (project.lot_width_m + 0.85, max(project.lot_depth_m - 1.5, 0.8)), project.north_angle_degrees)
 
 
 def _draw_site(msp, project: DrawingProject) -> None:
-    _add_polyline(msp, [(-0.5, -1.0), (5.5, -1.0), (5.5, 16.0), (-0.5, 16.0)], layer="L-SITE", closed=True)
+    _add_polyline(msp, project.site_polygon, layer="L-SITE", closed=True)
     _add_polyline(msp, project.roof_outline, layer="A-ROOF", closed=True)
-    _add_polyline(msp, [(0, 0), (5, 0), (5, 15), (0, 15)], layer="A-WALL", closed=True)
-    for x, y in ((0.5, -0.5), (4.5, -0.5), (0.5, 15.5), (4.5, 15.5)):
+    _add_polyline(msp, project.site_polygon, layer="A-WALL", closed=True)
+    for x, y in (
+        (0.5, -0.5),
+        (max(project.lot_width_m - 0.5, 0.5), -0.5),
+        (0.5, project.lot_depth_m + 0.5),
+        (max(project.lot_width_m - 0.5, 0.5), project.lot_depth_m + 0.5),
+    ):
         msp.add_circle((x, y), 0.22, dxfattribs={"layer": "L-PLNT"})
-    _add_text(msp, "Ranh đất 5 m x 15 m", (0.3, 15.25), height=0.18, layer="A-ANNO-TEXT")
+    _add_text(
+        msp,
+        f"Ranh đất {format_compact_m(project.lot_width_m)} m x {format_compact_m(project.lot_depth_m)} m | {project.display_lot_area_m2:.1f} m²",
+        (0.3, project.lot_depth_m + 0.25),
+        height=0.18,
+        layer="A-ANNO-TEXT",
+    )
     _draw_dimensions(msp, project)
-    _draw_north_arrow(msp, (5.85, 13.8))
+    _draw_north_arrow(msp, (project.lot_width_m + 0.85, max(project.lot_depth_m - 1.2, 0.8)), project.north_angle_degrees)
 
 
 def _draw_elevations(msp, project: DrawingProject) -> None:

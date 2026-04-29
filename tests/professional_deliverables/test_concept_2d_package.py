@@ -13,10 +13,13 @@ from app.services.design_intelligence.concept_drawing_qa import (
     validate_rendered_concept_bundle,
 )
 from app.services.design_intelligence.concept_model import seed_concept_model
+from app.services.design_intelligence.product_concept_adapter import adapt_live_design_version_to_concept_source
 from app.services.design_intelligence.customer_understanding import parse_customer_understanding
 from app.services.design_intelligence.layout_generator import generate_concept_layout
 from app.services.design_intelligence.style_inference import infer_style
+from app.services.geometry import build_geometry_v2
 from app.services.professional_deliverables.concept_pdf_generator import render_concept_2d_package
+from tests.test_flows import complete_brief_payload
 
 
 def _concept_layout():
@@ -163,3 +166,35 @@ def test_concept_package_qa_catches_duplicate_sheet_titles(tmp_path: Path):
     gates = validate_drawing_package_model(broken_package, concept)
 
     assert any(gate.code == "CONCEPT_SHEET_IDENTIFIERS" and gate.status == "fail" for gate in gates)
+
+
+def test_live_adapter_package_source_contains_full_concept_sheet_roles():
+    brief = complete_brief_payload()
+    brief["lot"] = {"width_m": 5, "depth_m": 20, "orientation": "south"}
+    brief["floors"] = 3
+    geometry = build_geometry_v2(brief)
+
+    result = adapt_live_design_version_to_concept_source(
+        project_id="live-package-source",
+        project_name="Live Package Source",
+        brief_json=brief,
+        geometry_json=geometry,
+        resolved_style_params={"style_id": "minimal_warm", "drawing_notes": ["Live package source note."]},
+        version_id="live-version",
+    )
+
+    assert result.is_ready
+    package = result.source.drawing_package
+    assert {
+        "cover_index",
+        "site",
+        "floorplan",
+        "elevations",
+        "sections",
+        "room_area_schedule",
+        "door_window_schedule",
+        "assumptions_style_notes",
+    } <= {sheet.kind for sheet in package.sheets}
+    assert package.qa_bounds["lot_width_m"] == 5
+    assert package.qa_bounds["lot_depth_m"] == 20
+    assert package.qa_bounds["floor_count"] == 3

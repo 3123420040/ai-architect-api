@@ -31,7 +31,7 @@ def render_concept_2d_package(
         drawing_project,
         output_root,
         require_dwg=require_dwg,
-        sheets=_concept_sheet_specs(package),
+        sheets=concept_sheet_specs(package),
     )
     return Concept2DRenderResult(drawing_package=package, drawing_project=drawing_project, bundle=bundle)
 
@@ -101,6 +101,10 @@ def concept_model_to_drawing_project(concept_model: ArchitecturalConceptModel, *
 
 
 def _concept_sheet_specs(package: DrawingPackageModel) -> tuple[SheetSpec, ...]:
+    return concept_sheet_specs(package)
+
+
+def concept_sheet_specs(package: DrawingPackageModel) -> tuple[SheetSpec, ...]:
     sheets: list[SheetSpec] = []
     for sheet in package.sheets:
         if sheet.kind == "cover_index":
@@ -125,12 +129,15 @@ def _concept_sheet_specs(package: DrawingPackageModel) -> tuple[SheetSpec, ...]:
 
 def _style_metadata(concept_model: ArchitecturalConceptModel) -> dict:
     style_id = str(concept_model.style.value) if concept_model.style else None
+    live_style = _live_style_metadata(concept_model)
     metadata = {
         "style_id": style_id,
-        "facade_strategy": concept_model.facade.strategy.value if concept_model.facade else None,
+        "style_display_name": live_style.get("style_name") or live_style.get("display_name"),
+        "facade_strategy": live_style.get("facade_strategy") or live_style.get("facade_intent") or (concept_model.facade.strategy.value if concept_model.facade else None),
+        "facade_intent": live_style.get("facade_intent"),
         "assumptions": tuple(assumption.customer_visible_explanation for assumption in concept_model.assumptions),
-        "drawing_notes": (),
-        "material_palette": {},
+        "drawing_notes": _as_tuple(live_style.get("drawing_notes") or live_style.get("style_notes")),
+        "material_palette": live_style.get("material_palette") if isinstance(live_style.get("material_palette"), dict) else {},
     }
     if not style_id:
         return metadata
@@ -140,10 +147,10 @@ def _style_metadata(concept_model: ArchitecturalConceptModel) -> dict:
         return metadata
     return {
         **metadata,
-        "style_display_name": profile.display_name,
-        "facade_intent": profile.facade_intent,
-        "drawing_notes": profile.drawing_notes,
-        "material_palette": profile.material_palette,
+        "style_display_name": metadata.get("style_display_name") or profile.display_name,
+        "facade_intent": metadata.get("facade_intent") or profile.facade_intent,
+        "drawing_notes": metadata.get("drawing_notes") or profile.drawing_notes,
+        "material_palette": metadata.get("material_palette") or profile.material_palette,
         "drawing_rules": profile.drawing_rules,
     }
 
@@ -151,7 +158,10 @@ def _style_metadata(concept_model: ArchitecturalConceptModel) -> dict:
 def _to_drawing_opening(opening, wall_lookup: dict[str, ConceptWall]) -> Opening:
     wall = wall_lookup[opening.wall_id]
     width = float(opening.width_m.value)
-    start, end = _centered_span(wall.start.value, wall.end.value, width)
+    if opening.start and opening.end:
+        start, end = opening.start.value, opening.end.value
+    else:
+        start, end = _centered_span(wall.start.value, wall.end.value, width)
     return Opening(
         floor=_floor_number(opening.level_id),
         kind="window" if opening.opening_type == "window" else "door",
@@ -190,3 +200,18 @@ def _fixture_kind(fixture_type: str) -> str:
     if fixture_type in {"plant", "tree"}:
         return "plant"
     return "furniture"
+
+
+def _live_style_metadata(concept_model: ArchitecturalConceptModel) -> dict:
+    metadata = concept_model.metadata.get("style_metadata") if isinstance(concept_model.metadata, dict) else None
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _as_tuple(value) -> tuple:
+    if isinstance(value, tuple):
+        return value
+    if isinstance(value, list):
+        return tuple(item for item in value if item)
+    if isinstance(value, str) and value.strip():
+        return (value.strip(),)
+    return ()

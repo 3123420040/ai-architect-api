@@ -78,6 +78,8 @@ class ConceptOpening:
     height_m: DecisionValue
     sill_height_m: DecisionValue | None
     operation: DecisionValue
+    start: DecisionValue | None = None
+    end: DecisionValue | None = None
 
 
 @dataclass(frozen=True)

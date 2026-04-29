@@ -161,11 +161,24 @@ def compile_drawing_package(concept_model: ArchitecturalConceptModel) -> Drawing
 
 
 def _style_notes(concept_model: ArchitecturalConceptModel) -> tuple[str, ...]:
+    live_notes = _live_style_notes(concept_model)
     style_id = str(concept_model.style.value) if concept_model.style else ""
     if not style_id:
-        return ()
+        return live_notes
     try:
         profile = StyleKnowledgeBase.load_default().get(style_id)
     except StyleKnowledgeError:
+        return live_notes
+    return tuple(dict.fromkeys((*live_notes, *profile.drawing_notes)))
+
+
+def _live_style_notes(concept_model: ArchitecturalConceptModel) -> tuple[str, ...]:
+    metadata = concept_model.metadata.get("style_metadata") if isinstance(concept_model.metadata, dict) else None
+    if not isinstance(metadata, dict):
         return ()
-    return tuple(profile.drawing_notes)
+    notes = metadata.get("style_notes") or metadata.get("drawing_notes") or ()
+    if isinstance(notes, str):
+        return (notes,) if notes.strip() else ()
+    if isinstance(notes, (list, tuple)):
+        return tuple(str(note) for note in notes if str(note).strip())
+    return ()

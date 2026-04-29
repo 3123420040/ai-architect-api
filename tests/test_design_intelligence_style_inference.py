@@ -99,6 +99,34 @@ def test_image_descriptors_do_not_override_explicit_customer_dislike():
     assert any(item.startswith("explicit_dislike:") for item in indochine.evidence)
 
 
+def test_explicit_facade_dislikes_are_structured_without_erasing_selected_style():
+    understanding = parse_customer_understanding(
+        "Nha pho 5x20m, 3 tang, thich toi gian am, khong thich qua nhieu kinh, mat tien lanh, vat lieu toi bong."
+    )
+    result = infer_style(understanding)
+
+    assert result.selected_style_id == "minimal_warm"
+    assert {"too much glass", "cold facade", "glossy dark finishes"} <= set(understanding.dislikes)
+
+
+def test_reference_descriptors_with_arches_wood_and_rattan_are_style_hints():
+    understanding = parse_customer_understanding(
+        "Can ho 70m2, thich indochine nhe va khong gian am.",
+        reference_images=[
+            {
+                "visual_tags": ["arches", "rattan", "textured screens"],
+                "materials": ["wood", "neutral palette"],
+                "colors": ["soft contrast"],
+            }
+        ],
+    )
+    result = infer_style(understanding)
+
+    assert result.selected_style_id == "indochine_soft"
+    assert any(item.source == "reference_image_descriptor" for item in result.candidates[0].source_evidence)
+    assert all("analysis" not in item.signal.lower() for item in result.candidates[0].source_evidence)
+
+
 def test_low_confidence_returns_friendly_nontechnical_question():
     understanding = parse_customer_understanding("Nha cho gia dinh tre, muon dep va de o.")
     result = infer_style(understanding)

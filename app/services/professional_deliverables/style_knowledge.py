@@ -26,10 +26,14 @@ REQUIRED_PROFILE_FIELDS = (
     "default_rules",
     "facade_intent",
     "facade_rules",
+    "facade_expression",
     "material_palette",
+    "material_assumptions",
     "drawing_rules",
     "drawing_notes",
     "avoid_rules",
+    "dislike_suppression",
+    "reference_descriptor_mappings",
     "validation_rules",
     "explanation_templates",
 )
@@ -103,10 +107,14 @@ class StyleProfile:
     default_rules: dict[str, Any]
     facade_intent: str
     facade_rules: dict[str, Any]
+    facade_expression: dict[str, Any]
     material_palette: dict[str, Any]
+    material_assumptions: tuple[str, ...]
     drawing_rules: dict[str, Any]
     drawing_notes: tuple[str, ...]
     avoid_rules: tuple[str, ...]
+    dislike_suppression: dict[str, Any]
+    reference_descriptor_mappings: dict[str, Any]
     validation_rules: tuple[str, ...]
     explanation_templates: dict[str, str]
 
@@ -130,10 +138,14 @@ class StyleProfile:
             default_rules=_require_mapping(payload, "default_rules"),
             facade_intent=_require_text(payload, "facade_intent"),
             facade_rules=_require_mapping(payload, "facade_rules"),
+            facade_expression=_require_mapping(payload, "facade_expression"),
             material_palette=_require_mapping(payload, "material_palette"),
+            material_assumptions=_require_non_empty_sequence(payload, "material_assumptions"),
             drawing_rules=_require_mapping(payload, "drawing_rules"),
             drawing_notes=_require_non_empty_sequence(payload, "drawing_notes"),
             avoid_rules=_require_non_empty_sequence(payload, "avoid_rules"),
+            dislike_suppression=_require_mapping(payload, "dislike_suppression"),
+            reference_descriptor_mappings=_require_mapping(payload, "reference_descriptor_mappings"),
             validation_rules=_require_non_empty_sequence(payload, "validation_rules"),
             explanation_templates={str(key): str(value) for key, value in templates.items()},
         )
@@ -206,3 +218,79 @@ class StyleKnowledgeBase:
                 score += 1.4
                 evidence.append(signal)
         return score, tuple(dict.fromkeys(evidence))
+
+
+def profile_dislike_matches(profile: StyleProfile, dislikes: list[str] | tuple[str, ...]) -> tuple[dict[str, Any], ...]:
+    normalized_dislikes = [normalize_signal(dislike) for dislike in dislikes if dislike]
+    if not normalized_dislikes:
+        return ()
+    matches: list[dict[str, Any]] = []
+    for feature, rule in profile.dislike_suppression.items():
+        if not isinstance(rule, dict):
+            continue
+        keywords = _rule_keywords(rule)
+        matched_terms = _matched_terms(normalized_dislikes, keywords)
+        if not matched_terms:
+            continue
+        matches.append(
+            {
+                "feature": str(feature),
+                "matched_terms": matched_terms,
+                "replacement": str(rule.get("replacement") or ""),
+                "note": str(rule.get("note") or ""),
+                "drawing_note": str(rule.get("drawing_note") or rule.get("note") or ""),
+                "source": "explicit_dislike",
+                "style_id": profile.style_id,
+                "assumption": True,
+            }
+        )
+    return tuple(matches)
+
+
+def profile_reference_descriptor_matches(profile: StyleProfile, reference_signals: list[str] | tuple[str, ...]) -> tuple[dict[str, Any], ...]:
+    normalized_signals = [normalize_signal(signal) for signal in reference_signals if signal]
+    if not normalized_signals:
+        return ()
+    matches: list[dict[str, Any]] = []
+    for feature, rule in profile.reference_descriptor_mappings.items():
+        if not isinstance(rule, dict):
+            continue
+        keywords = _rule_keywords(rule)
+        matched_terms = _matched_terms(normalized_signals, keywords)
+        if not matched_terms:
+            continue
+        matches.append(
+            {
+                "feature": str(feature),
+                "matched_terms": matched_terms,
+                "facade_mark": str(rule.get("facade_mark") or ""),
+                "material_note": str(rule.get("material_note") or ""),
+                "drawing_note": str(rule.get("drawing_note") or rule.get("material_note") or ""),
+                "source": "reference_image_descriptor",
+                "style_id": profile.style_id,
+                "assumption": True,
+            }
+        )
+    return tuple(matches)
+
+
+def _rule_keywords(rule: dict[str, Any]) -> tuple[str, ...]:
+    raw = rule.get("keywords") or ()
+    if isinstance(raw, str):
+        return (normalize_signal(raw),)
+    return tuple(normalize_signal(item) for item in raw if str(item).strip())
+
+
+def _matched_terms(values: list[str], keywords: tuple[str, ...]) -> tuple[str, ...]:
+    matched: list[str] = []
+    for value in values:
+        for keyword in keywords:
+            if _flex_contains(value, keyword):
+                matched.append(keyword)
+    return tuple(dict.fromkeys(matched))
+
+
+def _flex_contains(value: str, keyword: str) -> bool:
+    if not value or not keyword:
+        return False
+    return keyword in value or value in keyword

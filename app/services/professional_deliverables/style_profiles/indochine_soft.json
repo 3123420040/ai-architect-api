@@ -4,7 +4,7 @@
   "version": "2026.04",
   "aliases": ["indochine soft", "soft indochine", "indochine", "indochine nhẹ", "đông dương nhẹ", "dong duong nhe", "Á Đông nhẹ", "a dong nhe"],
   "customer_language_signals": ["indochine", "đông dương", "ấm sang", "cổ điển nhẹ", "mây tre", "gạch bông", "vòm nhẹ", "truyền thống nhưng nhẹ", "gỗ tối", "màu kem", "hoài cổ nhẹ", "chất á đông"],
-  "visual_signals": ["arched opening", "rattan", "pattern tile", "dark wood accent", "cream wall", "decorative screen", "colonial shutters", "brass accent", "timber panel", "encaustic tile"],
+  "visual_signals": ["arched opening", "arches", "arch", "rattan", "pattern tile", "dark wood accent", "wood", "cream wall", "neutral palette", "soft contrast", "decorative screen", "textured screens", "colonial shutters", "brass accent", "timber panel", "encaustic tile"],
   "spatial_rules": {
     "primary_strategy": "calm symmetrical moments in key rooms with practical modern circulation",
     "ventilation": "use shutters, high openings, and shaded balconies conceptually",
@@ -48,7 +48,17 @@
     "massing": "simple volume with soft rhythm and shaded balcony",
     "screening": "rattan/wood-inspired screen zones used sparingly",
     "greenery": "small planted accents rather than dense tropical cover",
-    "expression": "warm, crafted, and restrained"
+    "expression": "warm, crafted, and restrained",
+    "rhythm": "soft symmetrical bays with selective arch or shutter moments",
+    "opening_language": "rectangular windows can be softened with arch/shutter/screen cues rather than ornate detail",
+    "shading": "deep reveals, shutters, and rattan/wood-inspired screens used as concept marks"
+  },
+  "facade_expression": {
+    "rhythm": "Soft vertical rhythm with one or two symmetrical moments, selective arches, and crafted screen/shutter bays.",
+    "opening_language": "Moderate openings; use a light arch, shutter, or screen cue only where it explains the style.",
+    "shading_language": "Deep reveals, timber/rattan-inspired screens, and small balcony shade elements.",
+    "material_zone_language": "Cream base, dark timber/rattan accents, pattern-tile base band, and warm metal hints.",
+    "client_explanation": "Indochine mềm dùng nhịp mặt đứng ấm và có thủ công, nhưng chi tiết vòm/mây/gạch chỉ là điểm nhấn concept để tránh nặng nề."
   },
   "material_palette": {
     "base": ["cream plaster", "warm white", "soft beige"],
@@ -56,6 +66,11 @@
     "landscape": ["potted greenery", "balcony planter"],
     "metal": ["aged bronze", "matte black"]
   },
+  "material_assumptions": [
+    "Palette is concept intent from the indochine_soft style profile and must be confirmed as real products later.",
+    "Timber, rattan, pattern tile, and brass-tone cues are visual direction only, not a final material specification.",
+    "Arches/screens are simplified concept marks and should not be read as measured fabrication details."
+  ],
   "drawing_rules": {
     "plan_notes": ["mark semi-open kitchen/living relationships", "show feature arch/screen zones only where spatially relevant"],
     "elevation_notes": ["show shutters/screens and balcony rhythm", "label material concept without detailed fabrication"],
@@ -63,6 +78,40 @@
   },
   "drawing_notes": ["Use feature arch/screen labels sparingly and only where tied to a room.", "For apartments, note fixed wet/core assumptions instead of moving them silently.", "Keep decorative motifs simplified at concept scale."],
   "avoid_rules": ["overly ornate facade", "copying heritage motifs without simplifying", "dark enclosed rooms", "moving apartment wet areas without verified constraints"],
+  "dislike_suppression": {
+    "large_glass": {
+      "keywords": ["too much glass", "qua nhieu kinh", "nhieu kinh", "less glass", "giam kinh", "bot kinh", "it kinh"],
+      "replacement": "moderate openings with shutter/screen rhythm and warmer solid surfaces",
+      "note": "Suppress glass-heavy expression and use shutters/screens to keep the facade warm and private.",
+      "drawing_note": "Giảm kính theo dislike: dùng cửa vừa phải với shutter/màn mây-gỗ và mảng tường kem."
+    },
+    "dark_closed_interior": {
+      "keywords": ["dark interior", "noi that toi", "closed interior", "kin toi", "dong kin", "too ornate", "qua cau ky"],
+      "replacement": "cream base, lighter circulation notes, and restrained screen/arch accents",
+      "note": "Suppress dark/closed or overly ornate interpretation of Indochine.",
+      "drawing_note": "Tránh cảm giác tối/nặng: giữ nền kem sáng và chi tiết Đông Dương tiết chế."
+    }
+  },
+  "reference_descriptor_mappings": {
+    "soft_arch": {
+      "keywords": ["arched opening", "arch", "arches", "vom", "vòm", "soft arch", "curved"],
+      "facade_mark": "soft arch cue",
+      "material_note": "Map descriptor to a simplified arch cue in facade/interior-equivalent notes.",
+      "drawing_note": "Descriptor hint: vòm nhẹ là cảm hứng style, không phải đo đạc từ ảnh."
+    },
+    "rattan_timber_screen": {
+      "keywords": ["rattan", "may tre", "mây tre", "wood", "dark wood", "timber", "decorative screen", "textured screens", "screen"],
+      "facade_mark": "rattan/timber screen bay",
+      "material_note": "Map descriptor to restrained rattan/timber screen and warm accent notes.",
+      "drawing_note": "Descriptor hint: mây/gỗ là hướng vật liệu concept để khách phản hồi."
+    },
+    "cream_pattern_palette": {
+      "keywords": ["cream", "cream wall", "neutral palette", "soft contrast", "pattern tile", "gach bong", "gạch bông", "brass"],
+      "facade_mark": "cream base and pattern-tile accent",
+      "material_note": "Map descriptor to cream base, soft contrast, and a small pattern-tile accent zone.",
+      "drawing_note": "Descriptor hint: tông kem/gạch bông là ghi chú palette concept, chưa chốt vật liệu."
+    }
+  },
   "validation_rules": ["heritage-inspired notes must remain concept-level", "apartment renovation should preserve fixed shafts unless verified otherwise", "assumptions must stay concept-only"],
   "explanation_templates": {
     "style_summary": "Hướng Indochine mềm phù hợp khi gia chủ thích cảm giác ấm, có chất Á Đông nhưng không quá nặng chi tiết.",

@@ -4,7 +4,7 @@
   "version": "2026.04",
   "aliases": ["minimal warm", "warm minimal", "modern minimalist", "modern minimal", "modern_minimalist", "modern", "minimalist", "tối giản ấm", "toi gian am", "hiện đại ấm", "hien dai am", "ấm tối giản", "nha gon am"],
   "customer_language_signals": ["tối giản", "ấm", "gọn", "ít bảo trì", "dễ dọn", "trung tính", "nhẹ nhàng", "không cầu kỳ", "low maintenance", "nhiều lưu trữ", "dễ chăm sóc", "sạch sẽ", "ít chi tiết"],
-  "visual_signals": ["warm neutral palette", "light wood", "plain walls", "soft indirect lighting", "built-in storage", "minimal facade", "flat panel cabinet", "greige wall", "concealed storage"],
+  "visual_signals": ["warm neutral palette", "neutral palette", "light wood", "wood", "plain walls", "soft contrast", "soft indirect lighting", "built-in storage", "built in storage", "minimal facade", "flat panel cabinet", "greige wall", "concealed storage"],
   "spatial_rules": {
     "primary_strategy": "simple rectangular room sequence with efficient storage and clear circulation",
     "ventilation": "use practical windows and compact lightwell when needed",
@@ -48,7 +48,17 @@
     "massing": "calm flat planes with one or two warm accents",
     "screening": "minimal vertical screen only where privacy or sun control is needed",
     "greenery": "controlled low-maintenance planters",
-    "expression": "quiet, tidy, and warm"
+    "expression": "quiet, tidy, and warm",
+    "rhythm": "two or three calm vertical bays with one warm solid panel",
+    "opening_language": "moderate rectangular openings, recessed or screened where privacy matters",
+    "shading": "thin shadow ledges and simple reveals rather than decorative sun-breakers"
+  },
+  "facade_expression": {
+    "rhythm": "Calm asymmetric bays, one warm accent plane, and enough solid wall to feel private.",
+    "opening_language": "Moderate rectangular windows; avoid a glass-heavy frontage unless the homeowner asks for it.",
+    "shading_language": "Simple recessed reveals, slim ledges, and optional low-maintenance screen zones.",
+    "material_zone_language": "Warm white/greige base with light wood or travertine-look accent panels.",
+    "client_explanation": "Mặt tiền tối giản ấm ưu tiên mảng phẳng dễ bảo trì, ít vật liệu và cửa mở vừa phải để nhà gọn mà vẫn ấm."
   },
   "material_palette": {
     "base": ["warm white", "greige", "light grey"],
@@ -56,6 +66,11 @@
     "landscape": ["low-maintenance planter"],
     "metal": ["matte black", "champagne bronze"]
   },
+  "material_assumptions": [
+    "Palette is concept intent from the minimal_warm style profile and must be confirmed as real products later.",
+    "Warm wood/greige accents are visual direction only, not a final material specification.",
+    "Low-maintenance planting is shown as a homeowner-review cue, not a landscape specification."
+  ],
   "drawing_rules": {
     "plan_notes": ["show built-in storage where useful", "keep room sequence legible", "avoid overdecorating notes"],
     "elevation_notes": ["mark warm accent panels", "show clean openings", "keep concept facade simple"],
@@ -63,6 +78,34 @@
   },
   "drawing_notes": ["Mark built-in storage or service walls when they drive the plan.", "Keep material notes restrained and practical.", "Avoid adding decorative annotations that make the concept look busy."],
   "avoid_rules": ["busy decorative facade", "too many materials", "oversized maintenance-heavy planting", "dark cluttered rooms"],
+  "dislike_suppression": {
+    "large_glass": {
+      "keywords": ["too much glass", "qua nhieu kinh", "nhieu kinh", "less glass", "giam kinh", "bot kinh", "it kinh"],
+      "replacement": "moderate windows with warm solid panels or a light privacy screen",
+      "note": "Suppress glass-heavy facade language while keeping daylight through smaller shaded openings.",
+      "drawing_note": "Giảm kính theo dislike: dùng cửa vừa phải, mảng đặc ấm và lam/màn nhẹ nếu cần riêng tư."
+    },
+    "cold_dark_finishes": {
+      "keywords": ["cold facade", "mat tien lanh", "lanh", "glossy dark", "dark glossy", "toi bong", "vat lieu toi bong", "dark interior", "noi that toi"],
+      "replacement": "warm neutral base, matte finishes, and lighter timber/tile accents",
+      "note": "Suppress cold or glossy dark finish language in favor of warmer matte concept notes.",
+      "drawing_note": "Giảm cảm giác lạnh/tối theo dislike: ưu tiên nền sáng ấm và điểm nhấn mờ."
+    }
+  },
+  "reference_descriptor_mappings": {
+    "warm_wood_panel": {
+      "keywords": ["wood", "light wood", "warm neutral", "neutral palette", "soft contrast", "soft lighting", "built in storage", "concealed storage"],
+      "facade_mark": "warm accent panel",
+      "material_note": "Map homeowner-provided descriptors to light wood/greige concept accents.",
+      "drawing_note": "Descriptor hint: warm panel/storage language is shown as concept intent, not measured from an image."
+    },
+    "calm_storage_wall": {
+      "keywords": ["cabinet", "storage", "tu do", "luu tru", "plain walls", "minimal facade"],
+      "facade_mark": "quiet solid bay",
+      "material_note": "Use descriptors to reinforce tidy storage walls and calmer solid facade bays.",
+      "drawing_note": "Descriptor hint: quiet solid bays support low-clutter minimal warm expression."
+    }
+  },
   "validation_rules": ["storage intent should appear for apartment or compact townhouse scenarios", "materials should stay restrained", "assumptions must stay concept-only"],
   "explanation_templates": {
     "style_summary": "Hướng tối giản ấm phù hợp khi gia đình muốn không gian gọn, dễ chăm sóc và vẫn có cảm giác ấm.",

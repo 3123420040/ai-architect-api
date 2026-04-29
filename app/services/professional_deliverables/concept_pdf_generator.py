@@ -159,6 +159,7 @@ def _standalone_concept_package_metadata(package: DrawingPackageModel) -> dict:
 def _style_metadata(concept_model: ArchitecturalConceptModel) -> dict:
     style_id = str(concept_model.style.value) if concept_model.style else None
     live_style = _live_style_metadata(concept_model)
+    facade_material_notes = _facade_material_notes(concept_model)
     metadata = {
         "style_id": style_id,
         "style_display_name": live_style.get("style_name") or live_style.get("display_name"),
@@ -168,6 +169,14 @@ def _style_metadata(concept_model: ArchitecturalConceptModel) -> dict:
         "assumptions": tuple(assumption.customer_visible_explanation for assumption in concept_model.assumptions),
         "drawing_notes": _as_tuple(live_style.get("drawing_notes") or live_style.get("style_notes")),
         "material_palette": live_style.get("material_palette") if isinstance(live_style.get("material_palette"), dict) else {},
+        "material_assumptions": _as_tuple(live_style.get("material_assumptions")) or facade_material_notes,
+        "facade_rules": live_style.get("facade_rules") if isinstance(live_style.get("facade_rules"), dict) else {},
+        "facade_expression": live_style.get("facade_expression") if isinstance(live_style.get("facade_expression"), dict) else {},
+        "suppressed_style_features": tuple(live_style.get("suppressed_style_features") or ()),
+        "reference_style_hints": tuple(live_style.get("reference_style_hints") or ()),
+        "reference_descriptor_signals": tuple(live_style.get("reference_descriptor_signals") or ()),
+        "dislike_signals": tuple(live_style.get("dislike_signals") or ()),
+        "style_provenance": live_style.get("style_provenance") if isinstance(live_style.get("style_provenance"), dict) else {},
     }
     if not style_id:
         return metadata
@@ -175,13 +184,32 @@ def _style_metadata(concept_model: ArchitecturalConceptModel) -> dict:
         profile = StyleKnowledgeBase.load_default().get(style_id)
     except StyleKnowledgeError:
         return metadata
+    drawing_notes = tuple(
+        dict.fromkeys(
+            (
+                *_as_tuple(metadata.get("drawing_notes")),
+                *profile.drawing_notes,
+                *facade_material_notes,
+                *_feature_notes(metadata.get("suppressed_style_features")),
+                *_feature_notes(metadata.get("reference_style_hints")),
+            )
+        )
+    )
+    material_assumptions = _as_tuple(metadata.get("material_assumptions")) or profile.material_assumptions
+    provenance = dict(metadata.get("style_provenance") or {})
+    provenance.setdefault("facade_expression", {"source": "style_profile", "style_id": profile.style_id, "assumption": True})
+    provenance.setdefault("material_palette", {"source": "style_profile", "style_id": profile.style_id, "assumption": True})
     return {
         **metadata,
         "style_display_name": metadata.get("style_display_name") or profile.display_name,
         "facade_intent": metadata.get("facade_intent") or profile.facade_intent,
-        "drawing_notes": metadata.get("drawing_notes") or profile.drawing_notes,
+        "drawing_notes": drawing_notes,
         "material_palette": metadata.get("material_palette") or profile.material_palette,
+        "material_assumptions": material_assumptions,
         "drawing_rules": profile.drawing_rules,
+        "facade_rules": metadata.get("facade_rules") or profile.facade_rules,
+        "facade_expression": metadata.get("facade_expression") or profile.facade_expression,
+        "style_provenance": provenance,
     }
 
 
@@ -247,6 +275,23 @@ def _as_tuple(value) -> tuple:
     return ()
 
 
+def _facade_material_notes(concept_model: ArchitecturalConceptModel) -> tuple[str, ...]:
+    if not concept_model.facade:
+        return ()
+    return tuple(note.customer_visible_explanation for note in concept_model.facade.material_notes)
+
+
+def _feature_notes(value) -> tuple[str, ...]:
+    notes: list[str] = []
+    for item in value or ():
+        if not isinstance(item, dict):
+            continue
+        note = item.get("drawing_note") or item.get("note") or item.get("material_note")
+        if note:
+            notes.append(str(note))
+    return tuple(notes)
+
+
 def _style_display_label(concept_model: ArchitecturalConceptModel) -> str:
     style_id = str(concept_model.style.value) if concept_model.style else ""
     live_style = _live_style_metadata(concept_model)
@@ -295,5 +340,7 @@ def _operation_display_label(value) -> str:
         "sliding_or_swing": "trượt hoặc mở quay",
         "shaded_louver": "lam che nắng",
         "vent_louver": "ô thoáng thông gió",
+        "screened_reduced_glass": "màn/lam giảm kính",
+        "shuttered_screen": "shutter/màn nhẹ",
         "unspecified": "concept",
     }.get(text, text.replace("_", " "))

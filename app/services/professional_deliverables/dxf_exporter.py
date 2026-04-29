@@ -98,6 +98,8 @@ def _operation_display_label(operation: object | None) -> str:
         "sliding_or_swing": "truot hoac mo quay",
         "shaded_louver": "lam che nang",
         "vent_louver": "o thoang thong gio",
+        "screened_reduced_glass": "man/lam giam kinh",
+        "shuttered_screen": "shutter/man nhe",
         "unspecified": "concept",
     }.get(text, text.replace("_", " "))
 
@@ -369,19 +371,23 @@ def _draw_elevations(msp, project: DrawingProject) -> None:
         _add_polyline(msp, [(ox - 0.25, oy - 0.35), (ox + max_width + 0.25, oy - 0.35), (ox + max_width + 0.25, oy + height + 0.7), (ox - 0.25, oy + height + 0.7)], layer="A-ANNO-NPLT", closed=True, lineweight=9)
         _add_polyline(msp, [(ox, oy), (ox + width, oy), (ox + width, oy + height), (ox, oy + height)], layer="A-ELEV-OTLN", closed=True, lineweight=35)
         family = _style_family(project)
+        reduce_glass = _glass_suppressed(project)
         for level in range(project.storeys):
             base_y = oy + level * 3.3 + 0.15
             panel_x1 = ox + width * (0.08 if level % 2 == 0 else 0.54)
             panel_x2 = min(ox + width - 0.08, panel_x1 + max(width * 0.34, 0.9))
             _add_polyline(msp, [(panel_x1, base_y), (panel_x2, base_y), (panel_x2, base_y + 2.95), (panel_x1, base_y + 2.95)], layer="A-ELEV-OTLN", closed=True, lineweight=9)
-            opening_w = min(max(width * 0.28, 0.9), 2.2)
+            opening_factor = {"tropical": 0.34, "indochine": 0.24, "minimal": 0.22}[family]
+            if reduce_glass:
+                opening_factor = min(opening_factor, 0.18)
+            opening_w = min(max(width * opening_factor, 0.82), 2.35 if family == "tropical" and not reduce_glass else 1.75)
             win_x1 = max(ox + 0.25, min(ox + width - opening_w - 0.25, panel_x1 + 0.25))
             win_y1 = base_y + 0.85
             _add_polyline(msp, [(win_x1, win_y1), (win_x1 + opening_w, win_y1), (win_x1 + opening_w, win_y1 + 1.15), (win_x1, win_y1 + 1.15)], layer="A-GLAZ", closed=True, lineweight=18)
             if level > 0:
                 _add_polyline(msp, [(win_x1 - 0.15, base_y + 0.45), (win_x1 + opening_w + 0.15, base_y + 0.45)], layer="A-ROOF", lineweight=18)
-            if family in {"tropical", "indochine"}:
-                for index in range(4 if family == "tropical" else 3):
+            if family in {"tropical", "indochine"} or reduce_glass:
+                for index in range(max(4, 4 if family == "tropical" else 3) if reduce_glass else (4 if family == "tropical" else 3)):
                     fin_x = win_x1 + opening_w + 0.16 + index * 0.12
                     if fin_x < ox + width - 0.12:
                         _add_polyline(msp, [(fin_x, win_y1 - 0.08), (fin_x, win_y1 + 1.3)], layer="A-ELEV-OTLN", lineweight=13)
@@ -390,7 +396,52 @@ def _draw_elevations(msp, project: DrawingProject) -> None:
             _add_text(msp, f"L{level}", (ox + width + 0.18, oy + level * 3.3 - 0.06), height=0.12, layer="A-ANNO-TEXT")
         _add_text(msp, f"Mặt đứng {label}", (ox, oy + height + 0.28), height=0.18, layer="A-ANNO-TEXT")
     _add_text(msp, f"Style concept: {_customer_style_label(project)}", (0.0, upper_y + height + 0.8), height=0.16, layer="A-ANNO-TEXT")
-    _add_text(msp, "Mat tien: nhan manh lop vat lieu, ban cong/lam che nang va cua theo style concept.", (0.0, upper_y + height + 0.45), height=0.13, layer="A-ANNO-TEXT")
+    y = upper_y + height + 0.45
+    for line in _facade_note_lines(project)[:4]:
+        _add_text(msp, _fit_cell_text(line, 15.0), (0.0, y), height=0.13, layer="A-ANNO-TEXT")
+        y -= 0.3
+
+
+def _metadata_feature_keys(project: DrawingProject, key: str) -> set[str]:
+    metadata = project.style_metadata or {}
+    features: set[str] = set()
+    for item in tuple(metadata.get(key) or ()):
+        if isinstance(item, dict) and item.get("feature"):
+            features.add(str(item["feature"]))
+    return features
+
+
+def _glass_suppressed(project: DrawingProject) -> bool:
+    metadata = project.style_metadata or {}
+    return metadata.get("facade_glass_policy") == "reduce_large_unshaded_glass" or "large_glass" in _metadata_feature_keys(project, "suppressed_style_features")
+
+
+def _feature_summaries(value, *, prefix: str) -> tuple[str, ...]:
+    summaries: list[str] = []
+    for item in value or ():
+        if not isinstance(item, dict):
+            continue
+        feature = str(item.get("feature") or "").replace("_", " ")
+        note = item.get("drawing_note") or item.get("note") or item.get("material_note")
+        if feature and note:
+            summaries.append(f"{prefix}: {feature} - {note}")
+        elif note:
+            summaries.append(f"{prefix}: {note}")
+    return tuple(summaries)
+
+
+def _facade_note_lines(project: DrawingProject) -> tuple[str, ...]:
+    metadata = project.style_metadata or {}
+    expression = metadata.get("facade_expression") if isinstance(metadata.get("facade_expression"), dict) else {}
+    note = metadata.get("facade_strategy") or metadata.get("facade_intent") or "mat tien theo style/profile concept."
+    lines = [f"Mat tien: {note}"]
+    if expression.get("rhythm"):
+        lines.append(f"Nhip mat dung: {expression['rhythm']}")
+    if expression.get("opening_language"):
+        lines.append(f"Ngon ngu cua mo: {expression['opening_language']}")
+    if expression.get("shading_language"):
+        lines.append(f"Che nang/loc nhin: {expression['shading_language']}")
+    return tuple(dict.fromkeys((*lines, *_feature_summaries(metadata.get("suppressed_style_features"), prefix="Dislike suppressed"), *_feature_summaries(metadata.get("reference_style_hints"), prefix="Reference descriptors"))))
 
 
 def _style_family(project: DrawingProject) -> str:
@@ -477,6 +528,13 @@ def _draw_assumptions_style_notes(msp, project: DrawingProject) -> None:
     _add_text(msp, f"Phong cach khach doc: {_customer_style_label(project)}", (0.0, 9.16), height=0.14, layer="A-ANNO-TEXT")
     y = 8.86
     note_lines = [f"Mat tien concept: {metadata.get('facade_strategy') or metadata.get('facade_intent') or 'theo style/profile concept.'}"]
+    expression = metadata.get("facade_expression") if isinstance(metadata.get("facade_expression"), dict) else {}
+    if expression.get("rhythm"):
+        note_lines.append(f"Nhip mat dung concept: {expression['rhythm']}")
+    if expression.get("opening_language"):
+        note_lines.append(f"Ngon ngu cua mo concept: {expression['opening_language']}")
+    if expression.get("shading_language"):
+        note_lines.append(f"Che nang/loc nhin concept: {expression['shading_language']}")
     note_lines.extend(str(note) for note in tuple(metadata.get("drawing_notes") or ())[:4])
     palette = metadata.get("material_palette") or {}
     if isinstance(palette, dict):
@@ -492,6 +550,13 @@ def _draw_assumptions_style_notes(msp, project: DrawingProject) -> None:
             value = facade_rules.get(key)
             if value:
                 note_lines.append(f"Luat mat tien - {key}: {value}")
+    note_lines.extend(str(note) for note in tuple(metadata.get("material_assumptions") or ())[:3])
+    note_lines.extend(_feature_summaries(metadata.get("suppressed_style_features"), prefix="Dislike suppressed"))
+    note_lines.extend(_feature_summaries(metadata.get("reference_style_hints"), prefix="Reference descriptors"))
+    if metadata.get("reference_descriptor_signals"):
+        note_lines.append("Reference descriptors are homeowner-provided style hints only; no real image analysis or measured drawing extraction is performed.")
+    if isinstance(metadata.get("style_provenance"), dict) and metadata["style_provenance"]:
+        note_lines.append("Provenance: style fields are tagged as style_profile, explicit_dislike, or reference_image_descriptor assumptions.")
     note_lines.extend(str(warning) for warning in tuple(metadata.get("planning_warnings") or ()))
     for note in note_lines:
         for line in _wrapped_text(note, max_chars=120):

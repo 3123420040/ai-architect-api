@@ -4,7 +4,7 @@
   "version": "2026.04",
   "aliases": ["modern tropical", "tropical modern", "tropical_modern", "green modern", "hiện đại nhiệt đới", "hiện đại xanh mát", "hien dai thoang nhieu cay", "nhà nhiệt đới hiện đại", "nha xanh hien dai"],
   "customer_language_signals": ["thoáng", "nhiều cây", "xanh mát", "gần gũi tự nhiên", "nhiều ánh sáng", "thông gió", "mát", "hien dai", "nhiet doi", "cây xanh trong nhà", "giếng trời", "sân trong", "ban công xanh"],
-  "visual_signals": ["wood louvers", "vertical screens", "deep overhang", "balcony greenery", "large shaded glass", "courtyard planting", "natural stone", "timber screen", "pergola", "green facade", "tropical plants"],
+  "visual_signals": ["wood louvers", "louver", "vertical screens", "textured screens", "deep overhang", "overhang", "balcony greenery", "greenery", "plants", "large shaded glass", "courtyard planting", "natural stone", "timber screen", "pergola", "green facade", "tropical plants"],
   "spatial_rules": {
     "primary_strategy": "public-to-private sequence with a planted lightwell or courtyard as the breathing core",
     "ventilation": "prefer cross ventilation through front/back openings and lightwell windows",
@@ -48,7 +48,17 @@
     "massing": "clean stacked volumes with recessed balconies",
     "screening": "vertical fins or timber-look louvers where privacy/sun control matters",
     "greenery": "visible planters on balcony and roof terrace",
-    "expression": "light, airy, and shaded rather than sealed"
+    "expression": "light, airy, and shaded rather than sealed",
+    "rhythm": "layered balcony/void rhythm with planted breaks between solid bays",
+    "opening_language": "larger openings are acceptable only when paired with shade, screen, or planter buffers",
+    "shading": "deep overhangs, timber-look louvers, balcony planters, and recessed glass"
+  },
+  "facade_expression": {
+    "rhythm": "Layered vertical rhythm with recessed balcony zones, green breaks, and shaded opening bays.",
+    "opening_language": "Readable large openings can appear, but every glass bay needs shade, screen, or planting.",
+    "shading_language": "Deep overhangs, vertical louvers, timber-look screens, and planter buffers.",
+    "material_zone_language": "Warm white/light grey base with timber-look slats, stone/terracotta accent, and visible greenery.",
+    "client_explanation": "Mặt tiền hiện đại nhiệt đới phải nhìn thoáng và xanh, nhưng kính luôn đi cùng che nắng/lọc nhìn để không thành mặt tiền nóng hoặc phô."
   },
   "material_palette": {
     "base": ["warm white render", "light grey render"],
@@ -56,6 +66,11 @@
     "landscape": ["tropical planting", "planter boxes"],
     "metal": ["matte black", "dark bronze"]
   },
+  "material_assumptions": [
+    "Palette is concept intent from the modern_tropical style profile and must be confirmed as real products later.",
+    "Timber-look slats, stone, terracotta, and planting are shown as massing/material direction, not final material specification.",
+    "Planter and louver zones are concept-review cues for shade/privacy, not fabrication or irrigation details."
+  ],
   "drawing_rules": {
     "plan_notes": ["show lightwell/green zones clearly", "mark shaded openings", "label ventilation intent"],
     "elevation_notes": ["show planter depth", "show screen/louver zones", "avoid decorative detail beyond concept"],
@@ -63,6 +78,34 @@
   },
   "drawing_notes": ["Label green/lightwell zones as concept intent.", "Show shade/screen zones on elevation without fabrication detail.", "Keep all notes at schematic homeowner-review level."],
   "avoid_rules": ["sealed facade with no planted or shaded zones", "dark heavy interiors without daylight strategy", "oversized unshaded glazing"],
+  "dislike_suppression": {
+    "large_glass": {
+      "keywords": ["too much glass", "qua nhieu kinh", "nhieu kinh", "less glass", "giam kinh", "bot kinh", "it kinh", "unshaded glass"],
+      "replacement": "screened openings, deeper shade, and more solid/planted facade zones",
+      "note": "Suppress unshaded glass-heavy tropical expression and keep daylight through screened, shaded openings.",
+      "drawing_note": "Giảm kính theo dislike: chuyển kính lớn thành cửa có lam, ban công xanh và mảng đặc ấm hơn."
+    },
+    "dark_closed_interior": {
+      "keywords": ["dark interior", "noi that toi", "closed interior", "kin toi", "dong kin", "dark heavy"],
+      "replacement": "lighter shaded openings, lightwell/green void notes, and brighter material language",
+      "note": "Suppress dark/closed language by emphasizing daylight, ventilation, and lighter shaded surfaces.",
+      "drawing_note": "Tránh cảm giác tối/kín: ghi rõ giếng trời, ban công xanh và cửa có che nắng."
+    }
+  },
+  "reference_descriptor_mappings": {
+    "louvered_shade": {
+      "keywords": ["wood louvers", "louver", "timber screen", "shade", "shading", "deep overhang", "overhang", "pergola", "textured screens"],
+      "facade_mark": "louver/screen bay",
+      "material_note": "Map descriptors to timber-look shade/screen concept zones.",
+      "drawing_note": "Descriptor hint: shade/screen zones are homeowner style hints, not measured image geometry."
+    },
+    "green_layer": {
+      "keywords": ["balcony greenery", "greenery", "plants", "plant", "tropical plants", "green facade", "courtyard planting"],
+      "facade_mark": "balcony planter",
+      "material_note": "Use descriptors to make planted balcony/void zones visible in elevation notes.",
+      "drawing_note": "Descriptor hint: greenery is shown as concept massing and review intent."
+    }
+  },
   "validation_rules": ["at least one green/lightwell strategy should be present for townhouse lots", "major bedrooms should have exterior or lightwell access where possible", "assumptions must stay concept-only"],
   "explanation_templates": {
     "style_summary": "Hướng hiện đại nhiệt đới phù hợp vì ưu tiên không gian thoáng, nhiều cây và ánh sáng tự nhiên.",

@@ -42,6 +42,7 @@ class DrawingPackageModel:
     layer_profile: str
     qa_bounds: dict[str, Any]
     source_model_version: str = "architectural-concept-model-v1"
+    style_provenance: dict[str, Any] = field(default_factory=dict)
 
     def sheets_by_kind(self, kind: str) -> tuple[DrawingSheetModel, ...]:
         return tuple(sheet for sheet in self.sheets if sheet.kind == kind)
@@ -164,6 +165,7 @@ def compile_drawing_package(concept_model: ArchitecturalConceptModel) -> Drawing
             "room_count": len(concept_model.rooms),
             "opening_count": len(concept_model.openings),
         },
+        style_provenance=_style_provenance(concept_model),
     )
 
 
@@ -176,7 +178,15 @@ def _style_notes(concept_model: ArchitecturalConceptModel) -> tuple[str, ...]:
         profile = StyleKnowledgeBase.load_default().get(style_id)
     except StyleKnowledgeError:
         return live_notes
-    return tuple(dict.fromkeys((*live_notes, *profile.drawing_notes)))
+    metadata_notes = _metadata_style_notes(concept_model)
+    facade_notes = tuple(note.customer_visible_explanation for note in concept_model.facade.material_notes) if concept_model.facade else ()
+    expression = profile.facade_expression
+    expression_notes = (
+        f"Nguồn style_profile:{profile.style_id} - nhịp mặt đứng: {expression.get('rhythm')}",
+        f"Nguồn style_profile:{profile.style_id} - ngôn ngữ cửa mở: {expression.get('opening_language')}",
+    )
+    material_notes = tuple(f"Nguồn style_profile:{profile.style_id} - {note}" for note in profile.material_assumptions)
+    return tuple(dict.fromkeys((*live_notes, *metadata_notes, *profile.drawing_notes, *facade_notes, *expression_notes, *material_notes)))
 
 
 def _live_style_notes(concept_model: ArchitecturalConceptModel) -> tuple[str, ...]:
@@ -189,6 +199,33 @@ def _live_style_notes(concept_model: ArchitecturalConceptModel) -> tuple[str, ..
     if isinstance(notes, (list, tuple)):
         return tuple(str(note) for note in notes if str(note).strip())
     return ()
+
+
+def _metadata_style_notes(concept_model: ArchitecturalConceptModel) -> tuple[str, ...]:
+    metadata = concept_model.metadata.get("style_metadata") if isinstance(concept_model.metadata, dict) else None
+    if not isinstance(metadata, dict):
+        return ()
+    notes: list[str] = []
+    for item in tuple(metadata.get("suppressed_style_features") or ()):
+        if isinstance(item, dict):
+            note = item.get("drawing_note") or item.get("note")
+            if note:
+                notes.append(f"Nguồn explicit_dislike - {note}")
+    for item in tuple(metadata.get("reference_style_hints") or ()):
+        if isinstance(item, dict):
+            note = item.get("drawing_note") or item.get("material_note")
+            if note:
+                notes.append(f"Nguồn reference_image_descriptor - {note}")
+    return tuple(notes)
+
+
+def _style_provenance(concept_model: ArchitecturalConceptModel) -> dict[str, Any]:
+    metadata = concept_model.metadata.get("style_metadata") if isinstance(concept_model.metadata, dict) else None
+    if isinstance(metadata, dict) and isinstance(metadata.get("style_provenance"), dict):
+        return dict(metadata["style_provenance"])
+    if concept_model.style:
+        return {"style_id": concept_model.style.as_dict()}
+    return {}
 
 
 def _operation_note(value: Any) -> str:
@@ -221,6 +258,8 @@ def _operation_note(value: Any) -> str:
         "sliding_or_swing": "trượt hoặc mở quay",
         "shaded_louver": "lam che nắng",
         "vent_louver": "ô thoáng thông gió",
+        "screened_reduced_glass": "màn/lam giảm kính",
+        "shuttered_screen": "shutter/màn nhẹ",
         "unspecified": "concept",
     }.get(text, text.replace("_", " "))
 

@@ -32,6 +32,15 @@ def _concept_layout():
     return generate_concept_layout(concept_model=concept, understanding=understanding, style_id=style.selected_style_id)
 
 
+def _render_from_message(message: str, tmp_path: Path, *, reference_images: list[dict] | None = None):
+    understanding = parse_customer_understanding(message, reference_images=reference_images)
+    style = infer_style(understanding)
+    concept = seed_concept_model(project_id=f"style-{abs(hash(message))}", understanding=understanding, style_inference=style)
+    layout = generate_concept_layout(concept_model=concept, understanding=understanding, style_id=style.selected_style_id)
+    render = render_concept_2d_package(layout, tmp_path, project_name="Style Concept", require_dwg=False)
+    return understanding, style, layout, render, _pdf_text(render.bundle.pdf_path)
+
+
 def _pdf_text(path: Path) -> str:
     with fitz.open(path) as doc:
         return "\n".join(page.get_text("text") for page in doc)
@@ -145,6 +154,67 @@ def test_concept_render_qa_gates_report_pass_or_explicit_skip(tmp_path: Path):
 
     assert gates
     assert all(gate.status == "pass" for gate in gates)
+
+
+def test_style_selection_changes_facade_expression_and_material_notes(tmp_path: Path):
+    _minimal_understanding, minimal_style, _minimal_layout, _minimal_render, minimal_text = _render_from_message(
+        "Nha pho 5x20m, 3 tang, 3 phong ngu, thich toi gian am, it bao tri va nhieu luu tru.",
+        tmp_path / "minimal",
+    )
+    _tropical_understanding, tropical_style, _tropical_layout, _tropical_render, tropical_text = _render_from_message(
+        "Nha pho 5x20m, 4 tang, 4 phong ngu, thich hien dai nhiet doi, thoang, nhieu cay va che nang.",
+        tmp_path / "tropical",
+    )
+    _indochine_understanding, indochine_style, _indochine_layout, _indochine_render, indochine_text = _render_from_message(
+        "Nha pho 6x22m, 3 tang, gia dinh co tre nho, thich indochine nhe, go va may tre.",
+        tmp_path / "indochine",
+    )
+
+    assert minimal_style.selected_style_id == "minimal_warm"
+    assert tropical_style.selected_style_id == "modern_tropical"
+    assert indochine_style.selected_style_id == "indochine_soft"
+    assert "Calm asymmetric bays" in minimal_text
+    assert "Layered vertical rhythm" in tropical_text
+    assert "Soft vertical rhythm" in indochine_text
+    assert "Vật liệu nền concept" in minimal_text
+    assert "Vật liệu nền concept" in tropical_text
+    assert "Vật liệu nền concept" in indochine_text
+    assert len({minimal_text, tropical_text, indochine_text}) == 3
+
+
+def test_explicit_dislikes_reduce_glass_and_surface_in_style_output(tmp_path: Path):
+    understanding, style, layout, _render, text = _render_from_message(
+        "Nha pho 5x20m, 3 tang, thich hien dai nhiet doi nhung khong thich qua nhieu kinh, mat tien lanh, vat lieu toi bong.",
+        tmp_path / "dislikes",
+    )
+
+    assert style.selected_style_id == "modern_tropical"
+    assert "too much glass" in understanding.dislikes
+    front_windows = [opening for opening in layout.openings if opening.opening_type == "window" and opening.wall_id.endswith("-front")]
+    assert front_windows
+    assert all(float(opening.width_m.value) < 1.6 for opening in front_windows)
+    assert "Dislike suppressed: large glass" in text
+    assert "Giảm kính theo dislike" in text
+    assert "Provenance: style-derived facade/material fields are tagged" in text
+
+
+def test_reference_descriptors_render_as_style_hints_not_image_analysis(tmp_path: Path):
+    _understanding, style, _layout, _render, text = _render_from_message(
+        "Can ho 70m2, 2 phong ngu, 2 wc, thich indochine nhe, luu tru gon va phong khach am.",
+        tmp_path / "reference-descriptors",
+        reference_images=[
+            {
+                "visual_tags": ["arches", "rattan", "textured screens"],
+                "materials": ["wood", "neutral palette"],
+                "colors": ["soft contrast"],
+            }
+        ],
+    )
+
+    assert style.selected_style_id == "indochine_soft"
+    assert "Reference descriptors are homeowner-provided style hints only" in text
+    assert "no real image analysis" in text
+    assert "Reference descriptors: soft arch" in text or "Reference descriptors: rattan timber screen" in text
 
 
 def test_concept_render_qa_catches_missing_artifacts_and_titles(tmp_path: Path):

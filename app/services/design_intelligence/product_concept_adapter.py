@@ -491,8 +491,17 @@ def _resolve_style_contract(
         else profile.material_palette
         if profile is not None
         else {},
+        "material_assumptions": profile.material_assumptions if profile is not None else (),
         "drawing_rules": profile.drawing_rules if profile is not None else {},
         "facade_rules": profile.facade_rules if profile is not None else {},
+        "facade_expression": profile.facade_expression if profile is not None else {},
+        "suppressed_style_features": (),
+        "reference_style_hints": (),
+        "style_provenance": {
+            "style_id": {"source": style_origin or "adapter_default", "assumption": style_origin != "brief"},
+            "facade_expression": {"source": "style_profile" if profile is not None else "live_metadata", "style_id": style_id, "assumption": True},
+            "material_palette": {"source": "style_profile" if profile is not None else "live_metadata", "style_id": style_id, "assumption": True},
+        },
     }
     return {
         "style_decision": style_decision,
@@ -538,8 +547,17 @@ def _enrich_drawing_project_style(drawing_project: DrawingProject, concept_model
         style_metadata.setdefault("facade_strategy", profile.facade_intent)
         style_metadata.setdefault("drawing_notes", profile.drawing_notes)
         style_metadata.setdefault("material_palette", profile.material_palette)
+        style_metadata.setdefault("material_assumptions", profile.material_assumptions)
         style_metadata.setdefault("drawing_rules", profile.drawing_rules)
         style_metadata.setdefault("facade_rules", profile.facade_rules)
+        style_metadata.setdefault("facade_expression", profile.facade_expression)
+        style_metadata.setdefault(
+            "style_provenance",
+            {
+                "facade_expression": {"source": "style_profile", "style_id": profile.style_id, "assumption": True},
+                "material_palette": {"source": "style_profile", "style_id": profile.style_id, "assumption": True},
+            },
+        )
         warnings = _planning_warnings(drawing_project)
         if warnings:
             style_metadata["planning_warnings"] = warnings

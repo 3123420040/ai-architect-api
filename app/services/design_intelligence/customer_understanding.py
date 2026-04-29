@@ -109,7 +109,7 @@ def parse_customer_understanding(
     family_lifestyle = _extract_family_lifestyle(normalized)
     style_signals = _extract_style_signals(normalized)
     likes = _extract_preference_phrases(normalized, LIKE_KEYWORDS)
-    dislikes = _extract_preference_phrases(normalized, DISLIKE_KEYWORDS)
+    dislikes = tuple(dict.fromkeys((*_extract_preference_phrases(normalized, DISLIKE_KEYWORDS), *_extract_dislike_style_features(normalized))))
     image_signals = tuple(dict.fromkeys(signal for image in images for signal in image.signals()))
     missing_blockers = _missing_blockers(site_facts)
     assumptions = _assumptions(site_facts, room_program, images)
@@ -306,6 +306,25 @@ def _extract_preference_phrases(normalized: str, markers: tuple[str, ...]) -> tu
             if phrase:
                 phrases.append(phrase[:80])
     return tuple(dict.fromkeys(phrases))
+
+
+def _extract_dislike_style_features(normalized: str) -> tuple[str, ...]:
+    features: list[str] = []
+    negative_context = any(marker in normalized for marker in DISLIKE_KEYWORDS)
+    feature_groups = {
+        "too much glass": ("qua nhieu kinh", "nhieu kinh", "less glass", "giam kinh", "bot kinh", "it kinh", "unshaded glass"),
+        "cold facade": ("mat tien lanh", "cold facade", "it lanh", "bot lanh"),
+        "glossy dark finishes": ("vat lieu toi bong", "toi bong", "glossy dark", "dark glossy"),
+        "dark interior": ("noi that toi", "dark interior", "kin toi", "dong kin", "closed interior"),
+        "closed kitchen": ("bep kin", "closed kitchen"),
+        "narrow corridors": ("hanh lang hep", "narrow corridor", "narrow corridors"),
+    }
+    for label, keywords in feature_groups.items():
+        if not any(keyword in normalized for keyword in keywords):
+            continue
+        if negative_context or label in {"too much glass", "cold facade"}:
+            features.append(label)
+    return tuple(dict.fromkeys(features))
 
 
 def _missing_blockers(site_facts: dict[str, Any]) -> tuple[str, ...]:

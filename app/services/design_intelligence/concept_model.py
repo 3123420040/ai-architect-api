@@ -5,8 +5,14 @@ from math import sqrt
 from typing import Any
 
 from app.services.design_intelligence.customer_understanding import CustomerUnderstanding
-from app.services.design_intelligence.provenance import DecisionValue, ai_proposal, rule_default, user_fact
+from app.services.design_intelligence.provenance import DecisionValue, ai_proposal, reference_image, rule_default, style_profile as style_profile_value, user_fact
 from app.services.design_intelligence.style_inference import StyleInferenceResult
+from app.services.professional_deliverables.style_knowledge import (
+    StyleKnowledgeBase,
+    StyleKnowledgeError,
+    profile_dislike_matches,
+    profile_reference_descriptor_matches,
+)
 
 
 Point = tuple[float, float]
@@ -189,6 +195,13 @@ def seed_concept_model(
         rule_default(item, item, confidence=0.76, needs_confirmation="rectangle" in item.lower())
         for item in assumption_items
     )
+    style_metadata, style_assumptions = _style_metadata_from_understanding(
+        selected,
+        understanding=understanding,
+        style_decision=style_decision,
+        style_inference=style_inference,
+    )
+    assumptions = (*assumptions, *style_assumptions)
 
     model = ArchitecturalConceptModel(
         project_id=project_id,
@@ -224,6 +237,8 @@ def seed_concept_model(
             "missing_blockers": understanding.missing_blockers,
             "room_program_hints": understanding.room_program_hints,
             "family_lifestyle": understanding.family_lifestyle,
+            "project_type": understanding.project_type,
+            "style_metadata": style_metadata,
         },
     )
     validate_concept_model(model)
@@ -244,3 +259,125 @@ def validate_concept_model(model: ArchitecturalConceptModel) -> None:
         raise ConceptModelValidationError("At least one concept level is required")
     if model.style is not None and model.style.assumption is False and model.style.source != "user_fact":
         raise ConceptModelValidationError("AI-filled style decisions must preserve assumption metadata")
+
+
+def _style_metadata_from_understanding(
+    style_id: str,
+    *,
+    understanding: CustomerUnderstanding,
+    style_decision: DecisionValue,
+    style_inference: StyleInferenceResult,
+) -> tuple[dict[str, Any], tuple[DecisionValue, ...]]:
+    try:
+        profile = StyleKnowledgeBase.load_default().get(style_id)
+    except StyleKnowledgeError:
+        return (
+            {
+                "style_id": style_id,
+                "style_origin": "style_inference",
+                "style_provenance": {"style_id": style_decision.as_dict()},
+                "reference_descriptor_signals": understanding.image_signals,
+                "dislike_signals": understanding.dislikes,
+            },
+            (),
+        )
+
+    selected_candidate = next((candidate for candidate in style_inference.candidates if candidate.style_id == profile.style_id), None)
+    source_evidence = tuple(
+        {
+            "signal": evidence.signal,
+            "source": evidence.source,
+            "polarity": evidence.polarity,
+        }
+        for evidence in (selected_candidate.source_evidence if selected_candidate else ())
+    )
+    suppressed = profile_dislike_matches(profile, understanding.dislikes)
+    reference_hints = profile_reference_descriptor_matches(profile, understanding.image_signals)
+    drawing_notes = list(profile.drawing_notes)
+    drawing_notes.extend(match["drawing_note"] for match in suppressed if match.get("drawing_note"))
+    drawing_notes.extend(match["drawing_note"] for match in reference_hints if match.get("drawing_note"))
+    material_assumptions = tuple(profile.material_assumptions)
+    metadata = {
+        "style_id": profile.style_id,
+        "style_name": profile.display_name,
+        "style_display_name": profile.display_name,
+        "customer_style_label": _customer_style_label(profile.style_id, profile.display_name),
+        "style_origin": "style_inference",
+        "style_confidence": style_decision.confidence,
+        "style_evidence": source_evidence,
+        "reference_descriptor_signals": understanding.image_signals,
+        "reference_style_hints": reference_hints,
+        "dislike_signals": understanding.dislikes,
+        "suppressed_style_features": suppressed,
+        "facade_intent": profile.facade_intent,
+        "facade_strategy": profile.facade_intent,
+        "facade_rules": profile.facade_rules,
+        "facade_expression": profile.facade_expression,
+        "material_palette": profile.material_palette,
+        "material_assumptions": material_assumptions,
+        "drawing_rules": profile.drawing_rules,
+        "style_notes": tuple(dict.fromkeys(drawing_notes)),
+        "drawing_notes": tuple(dict.fromkeys(drawing_notes)),
+        "style_provenance": {
+            "style_id": style_decision.as_dict(),
+            "facade_expression": _profile_field_provenance(profile.style_id, "facade_expression"),
+            "material_palette": _profile_field_provenance(profile.style_id, "material_palette"),
+            "material_assumptions": _profile_field_provenance(profile.style_id, "material_assumptions"),
+            "suppressed_style_features": _derived_field_provenance("explicit_dislike", bool(suppressed)),
+            "reference_style_hints": _derived_field_provenance("reference_image_descriptor", bool(reference_hints)),
+        },
+    }
+    assumptions: list[DecisionValue] = [
+        style_profile_value(
+            note,
+            profile.style_id,
+            f"{note} This is concept material intent, not a final material specification.",
+            confidence=0.72,
+        )
+        for note in material_assumptions
+    ]
+    if suppressed:
+        assumptions.extend(
+            ai_proposal(
+                match["note"] or f"Suppress {match['feature']} because of explicit homeowner dislike.",
+                f"Style response follows explicit homeowner dislike for {match['feature']}.",
+                confidence=0.78,
+            )
+            for match in suppressed
+        )
+    if understanding.image_signals:
+        assumptions.append(
+            reference_image(
+                understanding.image_signals,
+                "Reference descriptors are homeowner-provided style hints only; no real image analysis or measured drawing extraction is performed.",
+                confidence=0.68,
+                needs_confirmation=True,
+            )
+        )
+    return metadata, tuple(assumptions)
+
+
+def _customer_style_label(style_id: str, display_name: str) -> str:
+    english = {
+        "minimal_warm": "Modern Minimalist",
+        "modern_tropical": "Modern Tropical",
+        "indochine_soft": "Indochine Soft",
+    }.get(style_id, style_id.replace("_", " ").title())
+    return f"{english} / {display_name}"
+
+
+def _profile_field_provenance(style_id: str, field_name: str) -> dict[str, Any]:
+    return {
+        "source": "style_profile",
+        "style_id": style_id,
+        "field": field_name,
+        "assumption": True,
+    }
+
+
+def _derived_field_provenance(source: str, present: bool) -> dict[str, Any]:
+    return {
+        "source": source,
+        "assumption": True,
+        "present": present,
+    }

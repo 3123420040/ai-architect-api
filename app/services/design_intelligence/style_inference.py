@@ -68,7 +68,9 @@ def infer_style(
     candidates.sort(key=lambda candidate: (-candidate.confidence, candidate.style_id))
     top = candidates[0] if candidates else None
     runner_up = candidates[1] if len(candidates) > 1 else None
-    needs_confirmation = top is None or top.confidence < 0.55 or (runner_up is not None and top.confidence - runner_up.confidence < 0.12)
+    strong_direct_evidence = top is not None and _has_strong_direct_style_evidence(top, kb)
+    close_runner_up = runner_up is not None and top is not None and top.confidence - runner_up.confidence < 0.12
+    needs_confirmation = top is None or top.confidence < 0.55 or (close_runner_up and not strong_direct_evidence)
     selected_style_id = None if needs_confirmation else top.style_id
     return StyleInferenceResult(
         candidates=tuple(candidates),
@@ -83,6 +85,20 @@ def _confidence(score: float, *, has_image_signals: bool) -> float:
         return 0.0
     denominator = 8.5 if has_image_signals else 7.5
     return round(min(0.92, score / denominator), 2)
+
+
+def _has_strong_direct_style_evidence(candidate: StyleCandidate, knowledge_base: StyleKnowledgeBase) -> bool:
+    profile = knowledge_base.get(candidate.style_id)
+    direct_aliases = {normalize_signal(profile.style_id), *profile.normalized_aliases}
+    for evidence in candidate.source_evidence:
+        if evidence.source != "customer_language" or evidence.polarity != "positive":
+            continue
+        signal = normalize_signal(evidence.signal)
+        if signal == normalize_signal(profile.style_id):
+            return True
+        if signal in direct_aliases and len(signal.split()) >= 2:
+            return True
+    return False
 
 
 def _score_profile_with_sources(

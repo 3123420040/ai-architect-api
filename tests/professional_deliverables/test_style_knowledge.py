@@ -9,6 +9,8 @@ from app.services.professional_deliverables.style_knowledge import (
     StyleKnowledgeError,
     StyleProfile,
     load_style_profiles,
+    profile_dislike_matches,
+    profile_reference_descriptor_matches,
 )
 
 
@@ -35,13 +37,41 @@ def test_initial_profiles_include_required_rule_groups(style_id: str):
     assert profile.default_rules["homeowner_question_policy"]
     assert profile.facade_intent
     assert profile.facade_rules["massing"]
+    assert profile.facade_expression["rhythm"]
     assert profile.material_palette["base"]
+    assert profile.material_assumptions
     assert profile.drawing_rules["plan_notes"]
     assert profile.drawing_notes
     assert profile.avoid_rules
+    assert profile.dislike_suppression
+    assert profile.reference_descriptor_mappings
     assert profile.validation_rules
     assert profile.customer_explanation()
     assert "technical dimensions" in profile.default_rules["homeowner_question_policy"]
+
+
+def test_style_profiles_map_explicit_dislikes_to_suppressed_features():
+    profile = StyleKnowledgeBase.load_default().get("modern_tropical")
+    matches = profile_dislike_matches(profile, ("khong thich qua nhieu kinh", "mat tien lanh"))
+
+    assert {match["feature"] for match in matches} >= {"large_glass"}
+    glass = next(match for match in matches if match["feature"] == "large_glass")
+    assert glass["source"] == "explicit_dislike"
+    assert glass["assumption"] is True
+    assert "shade" in glass["replacement"] or "screen" in glass["replacement"]
+
+
+def test_style_profiles_map_reference_descriptors_without_image_analysis_claim():
+    profile = StyleKnowledgeBase.load_default().get("indochine_soft")
+    matches = profile_reference_descriptor_matches(
+        profile,
+        ("arches", "wood", "rattan", "neutral palette", "textured screens"),
+    )
+
+    features = {match["feature"] for match in matches}
+    assert {"soft_arch", "rattan_timber_screen"} <= features
+    assert all(match["source"] == "reference_image_descriptor" for match in matches)
+    assert not any("analysis" in match["drawing_note"].lower() for match in matches)
 
 
 def test_pattern_memory_retrieves_7x25_modern_tropical_townhouse():
@@ -91,10 +121,14 @@ def test_style_profile_rejects_unsafe_scope_claims():
         "default_rules": {"homeowner_question_policy": "x"},
         "facade_intent": "x",
         "facade_rules": {"massing": "x"},
+        "facade_expression": {"rhythm": "x"},
         "material_palette": {"base": ["x"]},
+        "material_assumptions": ["x"],
         "drawing_rules": {"plan_notes": ["x"]},
         "drawing_notes": ["x"],
         "avoid_rules": ["x"],
+        "dislike_suppression": {"x": {"keywords": ["x"]}},
+        "reference_descriptor_mappings": {"x": {"keywords": ["x"]}},
         "validation_rules": ["issued " + "for construction"],
         "explanation_templates": {"style_summary": "x"},
     }
@@ -117,10 +151,14 @@ def test_style_profile_rejects_professional_scope_claims_in_any_field():
         "default_rules": {"homeowner_question_policy": "x"},
         "facade_intent": "x",
         "facade_rules": {"massing": "x"},
+        "facade_expression": {"rhythm": "x"},
         "material_palette": {"base": ["x"]},
+        "material_assumptions": ["x"],
         "drawing_rules": {"plan_notes": ["x"]},
         "drawing_notes": ["x"],
         "avoid_rules": ["x"],
+        "dislike_suppression": {"x": {"keywords": ["x"]}},
+        "reference_descriptor_mappings": {"x": {"keywords": ["x"]}},
         "validation_rules": ["x"],
         "explanation_templates": {"style_summary": "This produces permit drawings and code compliance."},
     }

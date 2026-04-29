@@ -5,6 +5,7 @@ from itertools import combinations
 
 from app.services.design_intelligence.concept_model import (
     ArchitecturalConceptModel,
+    ConceptFacade,
     ConceptFixture,
     ConceptModelValidationError,
     ConceptOpening,
@@ -17,8 +18,14 @@ from app.services.design_intelligence.concept_model import (
 )
 from app.services.design_intelligence.customer_understanding import CustomerUnderstanding
 from app.services.design_intelligence.program_planner import ProgramPlan, RoomProgramItem, plan_room_program
-from app.services.design_intelligence.provenance import DecisionValue
+from app.services.design_intelligence.provenance import DecisionValue, ai_proposal, reference_image, style_profile as style_profile_value
 from app.services.design_intelligence.technical_defaults import TechnicalDefaults, resolve_technical_defaults
+from app.services.professional_deliverables.style_knowledge import (
+    StyleKnowledgeBase,
+    StyleKnowledgeError,
+    profile_dislike_matches,
+    profile_reference_descriptor_matches,
+)
 
 
 class LayoutValidationError(ValueError):
@@ -40,10 +47,26 @@ def generate_concept_layout(
     rooms = _generate_rooms(program, width=width, depth=depth, floors=len(concept_model.levels))
     walls = _generate_walls(rooms, width=width, depth=depth, defaults=defaults)
     stairs = _generate_stairs(concept_model, rooms, width=width, depth=depth, defaults=defaults, program=program)
-    openings = _generate_openings(rooms, walls, width=width, depth=depth, defaults=defaults, style_id=resolved_style)
+    openings = _generate_openings(rooms, walls, width=width, depth=depth, defaults=defaults, style_id=resolved_style, understanding=understanding)
     fixtures = _generate_fixtures(rooms)
     section_lines = _generate_section_lines(width=width, depth=depth, stairs=stairs)
-    updated = replace(concept_model, rooms=rooms, walls=walls, openings=openings, stairs=stairs, fixtures=fixtures, section_lines=section_lines)
+    facade, metadata, assumptions = _generate_style_facade(
+        concept_model,
+        style_id=resolved_style,
+        understanding=understanding,
+    )
+    updated = replace(
+        concept_model,
+        rooms=rooms,
+        walls=walls,
+        openings=openings,
+        stairs=stairs,
+        fixtures=fixtures,
+        facade=facade,
+        section_lines=section_lines,
+        assumptions=assumptions,
+        metadata=metadata,
+    )
     validate_concept_model(updated)
     validate_layout(updated)
     return updated
@@ -393,9 +416,15 @@ def _generate_openings(
     depth: float,
     defaults: TechnicalDefaults,
     style_id: str,
+    understanding: CustomerUnderstanding,
 ) -> tuple[ConceptOpening, ...]:
     openings: list[ConceptOpening] = []
     wall_ids = {wall.id for wall in walls}
+    glass_suppressed = _suppresses_feature(style_id, understanding.dislikes, "large_glass")
+    front_window_width = _style_window_width(defaults.window_width_m, style_id=style_id, glass_suppressed=glass_suppressed)
+    rear_window_width = _style_window_width(defaults.window_width_m, style_id=style_id, glass_suppressed=False)
+    front_operation = _front_window_operation(style_id, glass_suppressed=glass_suppressed)
+    rear_operation = _rear_window_operation(style_id)
     for floor in sorted({int(room.level_id[1:]) for room in rooms}):
         level_id = f"L{floor}"
         front = f"wall-{level_id}-front"
@@ -423,10 +452,10 @@ def _generate_openings(
                         level_id=level_id,
                         wall_id=front,
                         opening_type="window",
-                        width_m=defaults.window_width_m,
+                        width_m=front_window_width,
                         height_m=defaults.window_height_m,
                         sill_height_m=defaults.window_sill_height_m,
-                        operation=_proposal("shaded_louver" if style_id == "modern_tropical" else "fixed_or_sliding", "Cửa sổ mặt tiền concept lấy từ style/default."),
+                        operation=front_operation,
                     )
                 )
         if back in wall_ids:
@@ -436,10 +465,10 @@ def _generate_openings(
                     level_id=level_id,
                     wall_id=back,
                     opening_type="window",
-                    width_m=defaults.window_width_m,
+                    width_m=rear_window_width,
                     height_m=defaults.window_height_m,
                     sill_height_m=defaults.window_sill_height_m,
-                    operation=_proposal("shaded_louver" if style_id == "modern_tropical" else "fixed_or_sliding", "Kiểu cửa sổ concept lấy từ style/default."),
+                    operation=rear_operation,
                 )
             )
         if side in wall_ids and any(room.level_id == level_id and room.room_type == "stair_lightwell" for room in rooms):
@@ -456,6 +485,138 @@ def _generate_openings(
                 )
             )
     return tuple(openings)
+
+
+def _generate_style_facade(
+    concept_model: ArchitecturalConceptModel,
+    *,
+    style_id: str,
+    understanding: CustomerUnderstanding,
+) -> tuple[ConceptFacade, dict, tuple[DecisionValue, ...]]:
+    metadata = dict(concept_model.metadata)
+    style_metadata = dict(metadata.get("style_metadata") or {})
+    assumptions = list(concept_model.assumptions)
+    try:
+        profile = StyleKnowledgeBase.load_default().get(style_id)
+    except StyleKnowledgeError:
+        facade = concept_model.facade or ConceptFacade(
+            style_id=concept_model.style or _proposal(style_id, "Style fallback for facade concept."),
+            strategy=ai_proposal("Facade follows available concept style metadata.", "Facade remains concept-only.", confidence=0.6),
+        )
+        metadata["style_metadata"] = style_metadata
+        return facade, metadata, tuple(assumptions)
+
+    suppressed = tuple(style_metadata.get("suppressed_style_features") or profile_dislike_matches(profile, understanding.dislikes))
+    reference_hints = tuple(style_metadata.get("reference_style_hints") or profile_reference_descriptor_matches(profile, understanding.image_signals))
+    strategy_parts = [profile.facade_intent]
+    if suppressed:
+        strategy_parts.append("Explicit dislikes reduce conflicting facade features before drawing.")
+    if reference_hints:
+        strategy_parts.append("Reference descriptors act as homeowner style hints only, not measured image facts.")
+    material_notes: list[DecisionValue] = [
+        style_profile_value(
+            note,
+            profile.style_id,
+            f"{note} Concept palette only; confirm real products later.",
+            confidence=0.72,
+        )
+        for note in profile.material_assumptions
+    ]
+    material_notes.extend(
+        ai_proposal(
+            match.get("note") or f"Suppress {match.get('feature')} in style expression.",
+            f"Style-derived suppression follows explicit dislike for {match.get('feature')}.",
+            confidence=0.78,
+        )
+        for match in suppressed
+    )
+    if reference_hints:
+        material_notes.append(
+            reference_image(
+                tuple(term for match in reference_hints for term in match.get("matched_terms", ())),
+                "Reference descriptors are carried as style hints for facade/material notes only; they are not measured drawings.",
+                confidence=0.68,
+                needs_confirmation=True,
+            )
+        )
+    drawing_notes = tuple(
+        dict.fromkeys(
+            (
+                *tuple(style_metadata.get("drawing_notes") or ()),
+                *profile.drawing_notes,
+                *(match.get("drawing_note") for match in suppressed if match.get("drawing_note")),
+                *(match.get("drawing_note") for match in reference_hints if match.get("drawing_note")),
+            )
+        )
+    )
+    style_metadata.update(
+        {
+            "style_id": profile.style_id,
+            "style_name": style_metadata.get("style_name") or profile.display_name,
+            "style_display_name": style_metadata.get("style_display_name") or profile.display_name,
+            "facade_intent": style_metadata.get("facade_intent") or profile.facade_intent,
+            "facade_strategy": " ".join(strategy_parts),
+            "facade_rules": style_metadata.get("facade_rules") or profile.facade_rules,
+            "facade_expression": style_metadata.get("facade_expression") or profile.facade_expression,
+            "material_palette": style_metadata.get("material_palette") or profile.material_palette,
+            "material_assumptions": style_metadata.get("material_assumptions") or profile.material_assumptions,
+            "drawing_rules": style_metadata.get("drawing_rules") or profile.drawing_rules,
+            "drawing_notes": drawing_notes,
+            "style_notes": drawing_notes,
+            "suppressed_style_features": suppressed,
+            "reference_style_hints": reference_hints,
+            "facade_glass_policy": "reduce_large_unshaded_glass" if any(match.get("feature") == "large_glass" for match in suppressed) else style_metadata.get("facade_glass_policy"),
+        }
+    )
+    provenance = dict(style_metadata.get("style_provenance") or {})
+    provenance.setdefault("facade_strategy", {"source": "style_profile", "style_id": profile.style_id, "assumption": True})
+    provenance.setdefault("suppressed_style_features", {"source": "explicit_dislike", "assumption": True, "present": bool(suppressed)})
+    provenance.setdefault("reference_style_hints", {"source": "reference_image_descriptor", "assumption": True, "present": bool(reference_hints)})
+    style_metadata["style_provenance"] = provenance
+    metadata["style_metadata"] = style_metadata
+    facade = ConceptFacade(
+        style_id=concept_model.style or style_profile_value(profile.style_id, profile.style_id, "Style profile selected for facade expression."),
+        strategy=style_profile_value(" ".join(strategy_parts), profile.style_id, "Facade strategy is derived from the selected style profile and customer style signals."),
+        material_notes=tuple(material_notes),
+    )
+    combined_assumptions: list[DecisionValue] = []
+    for decision in (*assumptions, *material_notes):
+        if decision not in combined_assumptions:
+            combined_assumptions.append(decision)
+    return facade, metadata, tuple(combined_assumptions)
+
+
+def _suppresses_feature(style_id: str, dislikes: tuple[str, ...], feature: str) -> bool:
+    try:
+        profile = StyleKnowledgeBase.load_default().get(style_id)
+    except StyleKnowledgeError:
+        return False
+    return any(match.get("feature") == feature for match in profile_dislike_matches(profile, dislikes))
+
+
+def _style_window_width(default_width: DecisionValue, *, style_id: str, glass_suppressed: bool) -> DecisionValue:
+    if not glass_suppressed:
+        return default_width
+    value = round(max(0.9, float(default_width.value) * 0.72), 2)
+    return style_profile_value(value, style_id, "Cửa sổ mặt tiền giảm bề rộng vì khách không thích quá nhiều kính.")
+
+
+def _front_window_operation(style_id: str, *, glass_suppressed: bool) -> DecisionValue:
+    if glass_suppressed:
+        return style_profile_value("screened_reduced_glass", style_id, "Mặt tiền dùng cửa có màn/lam để giảm cảm giác nhiều kính.")
+    if style_id == "modern_tropical":
+        return style_profile_value("shaded_louver", style_id, "Cửa sổ mặt tiền ưu tiên lam che nắng theo style tropical.")
+    if style_id == "indochine_soft":
+        return style_profile_value("shuttered_screen", style_id, "Cửa sổ mặt tiền dùng nhịp shutter/screen nhẹ theo style Indochine.")
+    return style_profile_value("fixed_or_sliding", style_id, "Cửa sổ mặt tiền giữ hình chữ nhật đơn giản theo style tối giản ấm.")
+
+
+def _rear_window_operation(style_id: str) -> DecisionValue:
+    if style_id == "modern_tropical":
+        return style_profile_value("shaded_louver", style_id, "Cửa sau ưu tiên che nắng/thông gió ở mức concept.")
+    if style_id == "indochine_soft":
+        return style_profile_value("shuttered_screen", style_id, "Cửa sau có thể dùng screen/shutter nhẹ ở mức concept.")
+    return style_profile_value("fixed_or_sliding", style_id, "Cửa sau dùng kiểu mở đơn giản ở mức concept.")
 
 
 def _generate_fixtures(rooms: tuple[ConceptRoom, ...]) -> tuple[ConceptFixture, ...]:

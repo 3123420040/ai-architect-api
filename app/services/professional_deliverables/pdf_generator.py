@@ -129,6 +129,8 @@ def _operation_display_label(operation: object | None) -> str:
         "sliding_or_swing": "trượt hoặc mở quay",
         "shaded_louver": "lam che nắng",
         "vent_louver": "ô thoáng thông gió",
+        "screened_reduced_glass": "màn/lam giảm kính",
+        "shuttered_screen": "shutter/màn nhẹ",
         "unspecified": "concept",
     }.get(text, text.replace("_", " "))
 
@@ -577,8 +579,28 @@ def _style_family(project: DrawingProject) -> str:
     return "minimal"
 
 
+def _metadata_feature_keys(project: DrawingProject, key: str) -> set[str]:
+    metadata = project.style_metadata or {}
+    features: set[str] = set()
+    for item in tuple(metadata.get(key) or ()):
+        if isinstance(item, dict) and item.get("feature"):
+            features.add(str(item["feature"]))
+    return features
+
+
+def _glass_suppressed(project: DrawingProject) -> bool:
+    metadata = project.style_metadata or {}
+    return metadata.get("facade_glass_policy") == "reduce_large_unshaded_glass" or "large_glass" in _metadata_feature_keys(project, "suppressed_style_features")
+
+
+def _reference_feature_keys(project: DrawingProject) -> set[str]:
+    return _metadata_feature_keys(project, "reference_style_hints")
+
+
 def _draw_style_facade_features(c: canvas.Canvas, project: DrawingProject, tx: Callable[[float, float], tuple[float, float]], width_m: float, height_m: float) -> None:
     family = _style_family(project)
+    reduce_glass = _glass_suppressed(project)
+    reference_features = _reference_feature_keys(project)
     base_fill = {
         "tropical": colors.HexColor("#eef6ef"),
         "indochine": colors.HexColor("#f4ead8"),
@@ -595,34 +617,67 @@ def _draw_style_facade_features(c: canvas.Canvas, project: DrawingProject, tx: C
         "minimal": colors.HexColor("#c6ad88"),
     }[family]
     _poly(c, [(0, 0), (width_m, 0), (width_m, height_m), (0, height_m)], tx, close=True, stroke=INK, width=1.35, fill=base_fill)
+    if family == "minimal":
+        accent_x1 = width_m * 0.58
+        _poly(c, [(accent_x1, 0.1), (min(width_m - 0.1, accent_x1 + width_m * 0.28), 0.1), (min(width_m - 0.1, accent_x1 + width_m * 0.28), height_m - 0.2), (accent_x1, height_m - 0.2)], tx, close=True, stroke=colors.HexColor("#d6c0a5"), width=0.45, fill=colors.HexColor("#efe2d0"))
+    if family == "indochine":
+        _poly(c, [(0.05, 0.18), (width_m - 0.05, 0.18), (width_m - 0.05, 0.48), (0.05, 0.48)], tx, close=True, stroke=screen, width=0.4, fill=colors.HexColor("#e6d1b5"))
     for level in range(project.storeys):
         y1 = level * 3.3 + 0.15
         y2 = min(y1 + 3.0, height_m - 0.1)
-        panel_x1 = width_m * (0.08 if level % 2 == 0 else 0.54)
-        panel_x2 = min(width_m - 0.08, panel_x1 + max(width_m * 0.34, 0.9))
+        if family == "indochine":
+            panel_x1 = width_m * (0.18 if level % 2 == 0 else 0.48)
+            panel_width_factor = 0.3
+        elif family == "tropical":
+            panel_x1 = width_m * (0.06 if level % 2 == 0 else 0.5)
+            panel_width_factor = 0.38
+        else:
+            panel_x1 = width_m * (0.08 if level % 2 == 0 else 0.46)
+            panel_width_factor = 0.28
+        panel_x2 = min(width_m - 0.08, panel_x1 + max(width_m * panel_width_factor, 0.9))
         _poly(c, [(panel_x1, y1), (panel_x2, y1), (panel_x2, y2), (panel_x1, y2)], tx, close=True, stroke=colors.HexColor("#d6d0c5"), width=0.4, fill=colors.HexColor("#fbfaf7"))
-        opening_w = min(max(width_m * 0.28, 0.9), 2.2)
+        opening_factor = {"tropical": 0.34, "indochine": 0.24, "minimal": 0.22}[family]
+        if reduce_glass:
+            opening_factor = min(opening_factor, 0.18)
+        opening_w = min(max(width_m * opening_factor, 0.82), 2.35 if family == "tropical" and not reduce_glass else 1.75)
         ox1 = max(0.25, min(width_m - opening_w - 0.25, panel_x1 + 0.25))
         oy1 = y1 + 0.85
         _poly(c, [(ox1, oy1), (ox1 + opening_w, oy1), (ox1 + opening_w, oy1 + 1.15), (ox1, oy1 + 1.15)], tx, close=True, stroke=colors.darkcyan, width=0.9, fill=colors.HexColor("#e8f5f7"))
+        if family == "indochine" and (level == 0 or "soft_arch" in reference_features):
+            x1, y_arc1 = tx(ox1, oy1 + 0.15)
+            x2, y_arc2 = tx(ox1 + opening_w, oy1 + 1.25)
+            c.setStrokeColor(screen)
+            c.setLineWidth(0.7)
+            c.arc(x1, y_arc1, x2, y_arc2 + 8, 0, 180)
         if level > 0:
             balcony_x1 = max(0.15, ox1 - 0.2)
             balcony_x2 = min(width_m - 0.15, ox1 + opening_w + 0.2)
             _poly(c, [(balcony_x1, y1 + 0.55), (balcony_x2, y1 + 0.55)], tx, stroke=accent, width=1.3)
             _poly(c, [(balcony_x1, y1 + 0.32), (balcony_x2, y1 + 0.32), (balcony_x2, y1 + 0.55), (balcony_x1, y1 + 0.55)], tx, close=True, stroke=accent, width=0.5, fill=colors.HexColor("#edf7ed") if family == "tropical" else colors.HexColor("#f4efe6"))
-        if family in {"tropical", "indochine"}:
+        if family in {"tropical", "indochine"} or reduce_glass:
             fin_count = 4 if family == "tropical" else 3
+            if reduce_glass:
+                fin_count = max(fin_count, 4)
             fin_x = min(width_m - 0.22, ox1 + opening_w + 0.18)
             for index in range(fin_count):
                 fx = fin_x + index * 0.12
                 if fx < width_m - 0.12:
                     _poly(c, [(fx, oy1 - 0.08), (fx, oy1 + 1.3)], tx, stroke=screen, width=0.7)
-        elif level % 2 == 0:
+        elif family == "minimal" and level % 2 == 0:
             _poly(c, [(0.15, y1 + 0.2), (width_m - 0.15, y1 + 0.2)], tx, stroke=screen, width=1.0)
+        if family == "tropical":
+            overhang_y = min(y2 - 0.25, oy1 + 1.35)
+            _poly(c, [(max(0.1, ox1 - 0.25), overhang_y), (min(width_m - 0.1, ox1 + opening_w + 0.45), overhang_y)], tx, stroke=screen, width=1.15)
+        if family == "minimal" and level == 0:
+            _poly(c, [(0.18, y1 + 0.42), (min(width_m - 0.18, ox1 + opening_w + 0.28), y1 + 0.42)], tx, stroke=accent, width=1.0)
     if family == "tropical":
         for gx in (width_m * 0.18, width_m * 0.58):
             for gy in (height_m - 1.1, max(1.2, height_m - 4.4)):
                 _poly(c, [(gx, gy), (gx + 0.35, gy + 0.5), (gx + 0.7, gy)], tx, stroke=accent, width=0.7, fill=colors.HexColor("#dff0df"))
+        if "green_layer" in reference_features:
+            for level in range(1, project.storeys):
+                gy = level * 3.3 + 0.52
+                _poly(c, [(width_m * 0.12, gy), (width_m * 0.28, gy + 0.28), (width_m * 0.44, gy)], tx, stroke=accent, width=0.65, fill=colors.HexColor("#dff0df"))
     if family == "indochine":
         arch_w = min(1.2, width_m * 0.28)
         ax1 = width_m * 0.12
@@ -632,6 +687,11 @@ def _draw_style_facade_features(c: canvas.Canvas, project: DrawingProject, tx: C
         c.setStrokeColor(screen)
         c.setLineWidth(0.9)
         c.arc(x1, y1, x2, y2 + 10, 0, 180)
+        if "cream_pattern_palette" in reference_features:
+            for index in range(max(2, int(width_m / 1.2))):
+                tile_x = 0.2 + index * 0.5
+                if tile_x + 0.24 < width_m:
+                    _poly(c, [(tile_x, 0.22), (tile_x + 0.18, 0.38)], tx, stroke=screen, width=0.28)
 
 
 def _draw_elevations(c: canvas.Canvas, project: DrawingProject) -> None:
@@ -662,10 +722,47 @@ def _draw_elevations(c: canvas.Canvas, project: DrawingProject) -> None:
             lx, ly = tx(width_m, level * 3.3)
             _text(c, f"L{level}", lx + 5, ly - 3, size=6, color=MUTED_INK)
         _text(c, f"Mặt đứng {label}", x0, y0 + height * scale + 10, size=8, bold=True)
+    note_lines = _facade_note_lines(project)
+    _text(c, f"Style concept: {_fit_text(_customer_style_label(project), 320, size=8)}", MARGIN + 22, CONTENT_BOTTOM - 8, size=8, color=MUTED_INK)
+    cursor = CONTENT_BOTTOM - 20
+    for line in note_lines[:3]:
+        _text(c, _fit_text(line, 720, size=6.7), MARGIN + 22, cursor, size=6.7, color=MUTED_INK)
+        cursor -= 10
+
+
+def _facade_note_lines(project: DrawingProject) -> tuple[str, ...]:
     metadata = project.style_metadata or {}
+    expression = metadata.get("facade_expression") if isinstance(metadata.get("facade_expression"), dict) else {}
     note = metadata.get("facade_strategy") or metadata.get("facade_intent") or "Mặt tiền concept thể hiện theo style và hình khối sơ bộ."
-    _text(c, f"Style concept: {_fit_text(_customer_style_label(project), 320, size=8)}", MARGIN + 22, CONTENT_BOTTOM - 12, size=8, color=MUTED_INK)
-    _text(c, _fit_text(f"Mặt tiền: {note}", 620, size=7), MARGIN + 22, CONTENT_BOTTOM - 26, size=7, color=MUTED_INK)
+    lines = [
+        f"Mặt tiền: {note}",
+    ]
+    rhythm = expression.get("rhythm")
+    openings = expression.get("opening_language")
+    shading = expression.get("shading_language")
+    if rhythm:
+        lines.append(f"Nhịp mặt đứng: {rhythm}")
+    if openings:
+        lines.append(f"Ngôn ngữ cửa mở: {openings}")
+    if shading:
+        lines.append(f"Che nắng/lọc nhìn: {shading}")
+    suppressed = _feature_summaries(metadata.get("suppressed_style_features"), prefix="Dislike suppressed")
+    references = _feature_summaries(metadata.get("reference_style_hints"), prefix="Reference descriptors")
+    return tuple(dict.fromkeys((*lines, *suppressed, *references)))
+
+
+def _feature_summaries(value, *, prefix: str) -> tuple[str, ...]:
+    summaries: list[str] = []
+    for item in value or ():
+        if not isinstance(item, dict):
+            continue
+        feature = str(item.get("feature") or "").replace("_", " ")
+        note = item.get("drawing_note") or item.get("note") or item.get("material_note")
+        if feature and note:
+            summaries.append(f"{prefix}: {feature} - {note}")
+        elif note:
+            summaries.append(f"{prefix}: {note}")
+    return tuple(summaries)
 
 
 def _draw_sections(c: canvas.Canvas, project: DrawingProject) -> None:
@@ -823,6 +920,13 @@ def _draw_assumptions_style_notes(c: canvas.Canvas, project: DrawingProject) -> 
         f"Phong cách khách đọc: {_customer_style_label(project)}",
         f"Mặt tiền concept: {metadata.get('facade_strategy') or metadata.get('facade_intent') or 'mặt tiền lấy từ style/profile và layout sơ bộ.'}",
     ]
+    expression = metadata.get("facade_expression") if isinstance(metadata.get("facade_expression"), dict) else {}
+    if expression.get("rhythm"):
+        style_lines.append(f"Nhịp mặt đứng concept: {expression['rhythm']}")
+    if expression.get("opening_language"):
+        style_lines.append(f"Ngôn ngữ cửa mở concept: {expression['opening_language']}")
+    if expression.get("shading_language"):
+        style_lines.append(f"Che nắng/lọc nhìn concept: {expression['shading_language']}")
     style_lines.extend(str(note) for note in tuple(metadata.get("drawing_notes") or ())[:4])
     palette = metadata.get("material_palette") or {}
     if isinstance(palette, dict) and palette:
@@ -838,6 +942,14 @@ def _draw_assumptions_style_notes(c: canvas.Canvas, project: DrawingProject) -> 
             value = facade_rules.get(key)
             if value:
                 style_lines.append(f"Luật mặt tiền - {key}: {value}")
+    style_lines.extend(str(note) for note in tuple(metadata.get("material_assumptions") or ())[:3])
+    style_lines.extend(_feature_summaries(metadata.get("suppressed_style_features"), prefix="Dislike suppressed"))
+    style_lines.extend(_feature_summaries(metadata.get("reference_style_hints"), prefix="Reference descriptors"))
+    if metadata.get("reference_descriptor_signals"):
+        style_lines.append("Reference descriptors are homeowner-provided style hints only; no real image analysis or measured drawing extraction is performed.")
+    provenance = metadata.get("style_provenance") if isinstance(metadata.get("style_provenance"), dict) else {}
+    if provenance:
+        style_lines.append("Provenance: style-derived facade/material fields are tagged as style_profile, explicit_dislike, or reference_image_descriptor assumptions.")
     style_lines.extend(str(warning) for warning in tuple(metadata.get("planning_warnings") or ()))
     for line in style_lines:
         for wrapped in _wrapped_lines(line, max_chars=108):

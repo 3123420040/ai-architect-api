@@ -135,6 +135,42 @@ def parse_revision_feedback(
                 affected_layout_intent="public_zone_priority",
             )
         )
+    if any(
+        keyword in normalized
+        for keyword in (
+            "bep va an rong hon",
+            "bep an rong hon",
+            "bep rong hon",
+            "nha bep rong hon",
+            "noi bep",
+            "noi khu bep",
+            "kitchen/dining larger",
+            "kitchen dining larger",
+            "kitchen larger",
+            "larger kitchen",
+            "enlarge kitchen",
+            "make kitchen larger",
+            "make the kitchen dining larger",
+        )
+    ):
+        kitchen_id = _find_room_id(concept_model, {"kitchen_dining"}, {"bếp", "bep", "bếp và ăn", "bep va an"})
+        operations.append(
+            _operation(
+                "resize_room_intent",
+                kitchen_id,
+                "increase_kitchen_dining_area",
+                {
+                    "delta_m": 0.6,
+                    "preserve_site_boundary": True,
+                    "preferred_tradeoff_room_types": ("secondary_bedroom", "storage", "living"),
+                    "allow_service_zone_shift": True,
+                },
+                0.86,
+                "Nới ưu tiên bếp/ăn trong concept, dùng phần dư hoặc cân lại phòng phụ nếu cần nhưng vẫn giữ ranh đất và chương trình chính.",
+                affected_room_id=kitchen_id,
+                affected_layout_intent="kitchen_dining_priority",
+            )
+        )
     if any(keyword in normalized for keyword in ("bep mo", "bep lien thong", "mo bep", "bep thoang hon")):
         kitchen_id = _find_room_id(concept_model, {"kitchen_dining"}, {"bếp", "bep"})
         operations.append(
@@ -161,6 +197,36 @@ def parse_revision_feedback(
                 "Ưu tiên bếp kín hơn để giảm mùi và tăng riêng tư, nhưng chưa đổi kết cấu ở mức concept.",
                 affected_room_id=kitchen_id,
                 affected_layout_intent="kitchen_privacy",
+            )
+        )
+    if any(
+        keyword in normalized
+        for keyword in (
+            "them luu tru",
+            "nhieu luu tru hon",
+            "them kho",
+            "them tu do",
+            "add more storage",
+            "more storage",
+            "storage near",
+            "near entry",
+            "near the entry",
+            "bedroom storage",
+        )
+    ):
+        operations.append(
+            _operation(
+                "add_storage_preference",
+                None,
+                "add_entry_and_bedroom_storage",
+                {
+                    "zones": ("entry", "bedrooms"),
+                    "reduce_secondary_bedroom_if_needed": "reduce secondary bedroom" in normalized or "giam phong ngu phu" in normalized,
+                    "preserve_required_room_count": True,
+                },
+                0.86,
+                "Bổ sung ý đồ lưu trữ gần lối vào và khu phòng ngủ; nếu cần chỉ thu gọn phòng ngủ phụ ở mức concept, không bỏ phòng bắt buộc.",
+                affected_layout_intent="storage_priority",
             )
         )
     if any(keyword in normalized for keyword in ("them phong ngu", "them 1 phong ngu", "add bedroom")):
@@ -272,7 +338,28 @@ def parse_revision_feedback(
                 affected_layout_intent="facade_expression",
             )
         )
-    if any(keyword in normalized for keyword in ("doi sang", "chuyen sang")) and any(keyword in normalized for keyword in ("indochine", "toi gian", "hien dai")):
+    target_style_id = _target_style_id(normalized)
+    if any(keyword in normalized for keyword in ("doi sang", "chuyen sang", "change the style", "change style")) and target_style_id:
+        previous_style_id = _current_style_id(concept_model)
+        operations.append(
+            _operation(
+                "change_style_direction",
+                "style",
+                "change_style_direction",
+                {
+                    "target_style_id": target_style_id,
+                    "previous_style_id": previous_style_id,
+                    "preserve_original_style_context": True,
+                    "preserve_geometry": True,
+                    "preserve_room_program": True,
+                    "feedback": feedback,
+                },
+                0.9 if target_style_id != previous_style_id else 0.78,
+                f"Đổi hướng style sang {_style_label(target_style_id)} ở mức concept, đồng thời giữ kích thước lô đất, số tầng và chương trình phòng gốc.",
+                affected_style_intent=target_style_id,
+            )
+        )
+    elif any(keyword in normalized for keyword in ("doi sang", "chuyen sang")) and any(keyword in normalized for keyword in ("indochine", "toi gian", "hien dai")):
         operations.append(
             _operation(
                 "add_or_strengthen_style_feature",
@@ -406,6 +493,24 @@ def _room_is_on_level(concept_model: ArchitecturalConceptModel, room_id: str, le
 
 def _current_style_id(concept_model: ArchitecturalConceptModel) -> str | None:
     return str(concept_model.style.value) if concept_model.style else None
+
+
+def _target_style_id(normalized: str) -> str | None:
+    if any(keyword in normalized for keyword in ("minimal warm", "toi gian am", "toi gian nong", "calmer and warmer", "calm and warm")):
+        return "minimal_warm"
+    if any(keyword in normalized for keyword in ("modern tropical", "hien dai nhiet doi", "nhiet doi", "xanh mat hien dai")):
+        return "modern_tropical"
+    if any(keyword in normalized for keyword in ("indochine", "dong duong", "dong duong nhe")):
+        return "indochine_soft"
+    return None
+
+
+def _style_label(style_id: str) -> str:
+    return {
+        "minimal_warm": "tối giản ấm",
+        "modern_tropical": "hiện đại nhiệt đới",
+        "indochine_soft": "Đông Dương nhẹ",
+    }.get(style_id, style_id.replace("_", " "))
 
 
 def _reference_descriptors(

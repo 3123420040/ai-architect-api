@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.services.design_intelligence.concept_model import seed_concept_model
 from app.services.design_intelligence.concept_revision import apply_revision_operations
 from app.services.design_intelligence.customer_understanding import parse_customer_understanding
+from app.services.design_intelligence.drawing_package_model import compile_drawing_package
 from app.services.design_intelligence.layout_generator import generate_concept_layout, validate_layout
 from app.services.design_intelligence.revision_interpreter import parse_revision_feedback
 from app.services.design_intelligence.style_inference import infer_style
@@ -65,6 +66,60 @@ def test_revision_application_creates_child_version_and_changelog():
     assert result.preserved_parent_evidence["lot_dimensions"]["depth_m"]["value"] == 25.0
     assert result.preserved_parent_evidence["selected_or_inferred_style"] == "modern_tropical"
     assert result.preserved_parent_evidence["assumptions"]
+
+
+def test_kitchen_storage_feedback_changes_plan_and_keeps_original_requirements():
+    concept = _layout("Nha pho 5x20m, 3 tang, 3 phong ngu, thich toi gian am, it bao tri va nhieu luu tru.")
+    kitchen_before = next(room for room in concept.rooms if room.room_type == "kitchen_dining")
+    secondary_before = next(room for room in concept.rooms if room.label_vi == "Phòng ngủ 3")
+    storage_count_before = len([room for room in concept.rooms if room.room_type == "storage"])
+    interpretation = parse_revision_feedback(
+        "Make the kitchen/dining larger, reduce the secondary bedroom if needed, and add more storage near the entry and bedrooms.",
+        concept,
+    )
+    result = apply_revision_operations(concept, interpretation.operations, parent_version_id="v1")
+    kitchen_after = next(room for room in result.child_model.rooms if room.id == kitchen_before.id)
+    secondary_after = next(room for room in result.child_model.rooms if room.id == secondary_before.id)
+    package = compile_drawing_package(result.child_model)
+
+    validate_layout(result.child_model)
+    assert {operation.intent for operation in interpretation.operations} >= {"increase_kitchen_dining_area", "add_entry_and_bedroom_storage"}
+    assert kitchen_after.area_m2.value > kitchen_before.area_m2.value
+    assert secondary_after.area_m2.value < secondary_before.area_m2.value
+    assert len([room for room in result.child_model.rooms if room.room_type == "storage"]) > storage_count_before
+    assert result.child_model.site.width_m.value == 5.0
+    assert result.child_model.site.depth_m.value == 20.0
+    assert len(result.child_model.levels) == len(concept.levels)
+    assert len([room for room in result.child_model.rooms if room.room_type == "bedroom"]) == 3
+    assert "room_priorities.storage" in result.child_model.metadata["revision_summary"]["changed_fields"]
+    assert package.qa_bounds["revision"]["parent_version_id"] == "v1"
+    assert package.qa_bounds["revision"]["child_version_id"] == result.child_version_id
+    assert any("Revision change:" in note for note in package.sheets_by_kind("assumptions_style_notes")[0].assumption_notes)
+
+
+def test_style_revision_changes_style_fields_without_geometry_or_program_drift():
+    concept = _layout(
+        "Nha pho 5x20m, 4 tang, 4 phong ngu, 4 wc, hien dai nhiet doi, thoang va nhieu cay."
+    )
+    interpretation = parse_revision_feedback(
+        "Change the style to minimal warm. Keep the same lot, number of floors, and room program. Make the facade calmer and warmer.",
+        concept,
+    )
+    result = apply_revision_operations(concept, interpretation.operations, parent_version_id="tropical-v1")
+    package = compile_drawing_package(result.child_model)
+
+    validate_layout(result.child_model)
+    assert _operation(interpretation, "change_style_direction").parameters["target_style_id"] == "minimal_warm"
+    assert result.child_model.style.value == "minimal_warm"
+    assert result.child_model.site.width_m.value == concept.site.width_m.value
+    assert result.child_model.site.depth_m.value == concept.site.depth_m.value
+    assert len(result.child_model.levels) == len(concept.levels)
+    assert len([room for room in result.child_model.rooms if room.room_type == "bedroom"]) == len([room for room in concept.rooms if room.room_type == "bedroom"])
+    assert result.child_model.metadata["preserved_requirements"]["selected_or_inferred_style"] == "modern_tropical"
+    assert result.child_model.metadata["style_metadata"]["previous_style_id"] == "modern_tropical"
+    assert result.child_model.metadata["style_metadata"]["style_id"] == "minimal_warm"
+    assert "style.selected_style_id" in result.child_model.metadata["revision_summary"]["changed_fields"]
+    assert package.style_provenance["revision_style_change"]["parameters"]["target_style_id"] == "minimal_warm"
 
 
 def test_revision_parser_supports_common_homeowner_operations():
@@ -142,6 +197,8 @@ def test_apartment_indochine_reference_descriptors_adjust_style_without_townhous
     assert len(result.child_model.levels) == 1
     assert not result.child_model.stairs
     assert result.child_model.metadata["preserved_requirements"]["project_type"] == "apartment_renovation"
+    assert result.child_model.metadata["style_metadata"]["reference_style_hints"]
+    assert any("no real image analysis" in assumption.customer_visible_explanation for assumption in result.child_model.assumptions)
     assert not any("townhouse" in str(assumption.value).lower() for assumption in result.child_model.assumptions)
 
 

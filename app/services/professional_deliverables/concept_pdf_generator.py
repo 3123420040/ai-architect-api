@@ -87,6 +87,8 @@ def concept_model_to_drawing_project(concept_model: ArchitecturalConceptModel, *
         storeys=len(concept_model.levels),
         style=_style_display_label(concept_model),
         issue_date=date.today(),
+        version_id=str(concept_model.metadata.get("child_version_id") or concept_model.metadata.get("version_id") or "") or None,
+        revision_label=_revision_label(concept_model),
         rooms=rooms,
         walls=walls,
         openings=openings,
@@ -140,7 +142,7 @@ def _standalone_concept_package_metadata(package: DrawingPackageModel) -> dict:
         }
         for sheet, spec in zip(package.sheets, concept_sheet_specs(package), strict=True)
     ]
-    return {
+    metadata = {
         "enabled": True,
         "readiness": "ready",
         "readiness_label": "Concept 2D technical-ready; market presentation depends on visual QA gates.",
@@ -154,6 +156,9 @@ def _standalone_concept_package_metadata(package: DrawingPackageModel) -> dict:
         "sheets": sheets,
         "qa_bounds": package.qa_bounds,
     }
+    if package.qa_bounds.get("revision"):
+        metadata["revision"] = package.qa_bounds["revision"]
+    return metadata
 
 
 def _style_metadata(concept_model: ArchitecturalConceptModel) -> dict:
@@ -166,7 +171,14 @@ def _style_metadata(concept_model: ArchitecturalConceptModel) -> dict:
         "customer_style_label": _style_display_label(concept_model),
         "facade_strategy": live_style.get("facade_strategy") or live_style.get("facade_intent") or (concept_model.facade.strategy.value if concept_model.facade else None),
         "facade_intent": live_style.get("facade_intent"),
-        "assumptions": tuple(assumption.customer_visible_explanation for assumption in concept_model.assumptions),
+        "assumptions": tuple(
+            dict.fromkeys(
+                (
+                    *(assumption.customer_visible_explanation for assumption in concept_model.assumptions),
+                    *_revision_notes(concept_model),
+                )
+            )
+        ),
         "drawing_notes": _as_tuple(live_style.get("drawing_notes") or live_style.get("style_notes")),
         "material_palette": live_style.get("material_palette") if isinstance(live_style.get("material_palette"), dict) else {},
         "material_assumptions": _as_tuple(live_style.get("material_assumptions")) or facade_material_notes,
@@ -263,6 +275,30 @@ def _fixture_kind(fixture_type: str) -> str:
 def _live_style_metadata(concept_model: ArchitecturalConceptModel) -> dict:
     metadata = concept_model.metadata.get("style_metadata") if isinstance(concept_model.metadata, dict) else None
     return metadata if isinstance(metadata, dict) else {}
+
+
+def _revision_label(concept_model: ArchitecturalConceptModel) -> str | None:
+    summary = concept_model.metadata.get("revision_summary") if isinstance(concept_model.metadata, dict) else None
+    if not isinstance(summary, dict):
+        return None
+    parent = summary.get("parent_version_id")
+    child = summary.get("child_version_id")
+    if parent and child:
+        return f"Revision from {parent} to {child}"
+    return "Client revision"
+
+
+def _revision_notes(concept_model: ArchitecturalConceptModel) -> tuple[str, ...]:
+    metadata = concept_model.metadata if isinstance(concept_model.metadata, dict) else {}
+    changelog = tuple(str(item) for item in metadata.get("customer_changelog") or () if str(item).strip())
+    summary = metadata.get("revision_summary") if isinstance(metadata.get("revision_summary"), dict) else {}
+    changed_fields = tuple(str(item) for item in summary.get("changed_fields") or () if str(item).strip())
+    notes = [f"Revision change: {item}" for item in changelog]
+    if changed_fields:
+        notes.append("Revision trace: changed fields - " + ", ".join(changed_fields[:8]))
+    if summary:
+        notes.append("Revision preservation: original lot geometry, floor count, required rooms, and concept-only status remain traceable unless explicitly changed.")
+    return tuple(dict.fromkeys(notes))
 
 
 def _as_tuple(value) -> tuple:

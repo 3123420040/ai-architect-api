@@ -87,3 +87,22 @@ def test_vietnamese_customer_sentence_extracts_critical_fields():
     assert "ventilation_priority" in brief["lifestyle_priorities"]
     assert "Nhiều ánh sáng tự nhiên và thông gió" in brief["must_haves"]
     assert "Tránh không gian bí, tối" in brief["must_not_haves"]
+
+
+def test_orientation_fact_is_not_polluted_by_lot_dimensions():
+    result = analyze_message_to_brief("Nhà phố 5x20m hướng Nam, phong cách modern minimal warm")
+
+    facts = {item["key"]: item for item in result["captured_facts"]}
+    brief = result["brief_json"]
+
+    assert brief["lot"]["width_m"] == 5
+    assert brief["lot"]["depth_m"] == 20
+    assert brief["lot"]["orientation"] == "south"
+    assert facts["orientation"]["value"] == "hướng Nam"
+    assert "5.0m x 20.0m" not in facts["orientation"]["value"]
+
+
+def test_modern_minimal_warm_phrase_keeps_specific_style_signal():
+    result = analyze_message_to_brief("Nhà phố 5x20m hướng Nam, thích modern minimal warm, ít bảo trì")
+
+    assert result["brief_json"]["style"] == "minimal_warm"

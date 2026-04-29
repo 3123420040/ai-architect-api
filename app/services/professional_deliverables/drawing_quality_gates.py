@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import ezdxf
@@ -97,6 +98,64 @@ def validate_pdf_dimension_chains(path: Path, project: DrawingProject) -> GateRe
     return GateResult("PDF_DIMENSION_CHAINS", "pass", "overall lot dimension chains and scale segment found")
 
 
+def validate_pdf_room_dimension_labels(path: Path, project: DrawingProject) -> GateResult:
+    text = _pdf_text(path)
+    expected: list[str] = []
+    for room in project.rooms:
+        min_x, min_y, max_x, max_y = _bounds(room.polygon)
+        expected.append(f"{format_dimension_m(max_x - min_x)} x {format_dimension_m(max_y - min_y)}")
+    found = [label for label in expected if label in text]
+    minimum = max(1, int(len(expected) * 0.7))
+    if len(found) < minimum:
+        missing = [label for label in expected if label not in text]
+        return GateResult("PDF_ROOM_DIMENSION_LABELS", "fail", f"found {len(found)}/{len(expected)} room dimension labels; missing {missing[:8]}")
+    return GateResult("PDF_ROOM_DIMENSION_LABELS", "pass", f"{len(found)}/{len(expected)} room dimension labels found")
+
+
+def validate_pdf_no_raw_internal_strings(path: Path) -> GateResult:
+    hits = _raw_internal_hits(_pdf_text(path))
+    if hits:
+        return GateResult("PDF_NO_RAW_INTERNAL_STRINGS", "fail", "raw/internal strings found: " + ", ".join(hits[:8]))
+    return GateResult("PDF_NO_RAW_INTERNAL_STRINGS", "pass", "no raw dict/json/internal operation strings found")
+
+
+def validate_pdf_section_height_labels(path: Path) -> GateResult:
+    text = _pdf_text(path)
+    section_text = text.split("Mặt cắt concept", 1)[-1] if "Mặt cắt concept" in text else text
+    if "3.30 m" not in section_text or "3.00 m" not in section_text:
+        return GateResult("PDF_SECTION_HEIGHT_LABELS", "fail", "section missing floor-to-floor and clear-height dimension labels")
+    return GateResult("PDF_SECTION_HEIGHT_LABELS", "pass", "section includes floor-to-floor and clear-height labels")
+
+
+def validate_pdf_style_material_notes(path: Path) -> GateResult:
+    text = _pdf_text(path).lower()
+    missing: list[str] = []
+    for token in ("style id:", "mặt tiền", "vật liệu"):
+        if token not in text:
+            missing.append(token)
+    style_label_present = any(token.lower() in text for token in ("Modern Minimalist", "Modern Tropical", "Indochine Soft"))
+    if not style_label_present:
+        missing.append("customer-readable bilingual style label")
+    if missing:
+        return GateResult("PDF_STYLE_MATERIAL_NOTES", "fail", "missing style/material notes: " + ", ".join(missing))
+    return GateResult("PDF_STYLE_MATERIAL_NOTES", "pass", "style label, facade strategy, and material notes are visible")
+
+
+def validate_pdf_elevation_visual_density(path: Path, *, minimum_ratio: float = 0.045) -> GateResult:
+    sparse_pages: list[str] = []
+    with fitz.open(path) as doc:
+        for index, page in enumerate(doc, start=1):
+            text = page.get_text("text")
+            if "Mặt đứng concept" not in text:
+                continue
+            ratio = _nonwhite_ratio(page)
+            if ratio < minimum_ratio:
+                sparse_pages.append(f"page {index}: {ratio:.3f}")
+    if sparse_pages:
+        return GateResult("PDF_ELEVATION_VISUAL_DENSITY", "fail", "sparse elevation pages: " + ", ".join(sparse_pages))
+    return GateResult("PDF_ELEVATION_VISUAL_DENSITY", "pass", f"elevation pages meet density threshold {minimum_ratio:.3f}")
+
+
 def validate_pdf_no_title_overlap(project: DrawingProject) -> GateResult:
     x, y, scale = plan_layout(project)
     top = y + project.lot_depth_m * scale
@@ -124,6 +183,20 @@ def validate_pdf_page_render_nonblank(path: Path) -> GateResult:
     if blank_pages:
         return GateResult("PDF_PAGE_RENDER_NONBLANK", "fail", f"blank or near-blank rendered pages: {blank_pages}")
     return GateResult("PDF_PAGE_RENDER_NONBLANK", "pass", "all PDF pages render with visible content")
+
+
+def _nonwhite_ratio(page: fitz.Page) -> float:
+    pix = page.get_pixmap(matrix=fitz.Matrix(0.18, 0.18), alpha=False)
+    channels = pix.n
+    samples = pix.samples
+    non_white = 0
+    total = 0
+    for offset in range(0, len(samples), channels):
+        pixel = samples[offset : offset + min(channels, 3)]
+        total += 1
+        if any(value < 245 for value in pixel):
+            non_white += 1
+    return non_white / total if total else 0.0
 
 
 def validate_pdf_sheet_title_blocks(path: Path, sheets: tuple | list) -> GateResult:
@@ -246,6 +319,29 @@ def validate_dxf_dimensions_match(path: Path, project: DrawingProject) -> GateRe
     return GateResult("DXF_DIMENSIONS_MATCH", "pass", f"{path.name}: dimensions match source")
 
 
+def validate_dxf_room_dimensions(paths: Path | tuple[Path, ...] | list[Path], project: DrawingProject) -> GateResult:
+    all_paths = (paths,) if isinstance(paths, Path) else tuple(paths)
+    text = "\n".join(_dxf_text(ezdxf.readfile(path)) for path in all_paths)
+    expected: list[str] = []
+    for room in project.rooms:
+        min_x, min_y, max_x, max_y = _bounds(room.polygon)
+        expected.append(f"{format_dimension_m(max_x - min_x)} x {format_dimension_m(max_y - min_y)}")
+    found = [label for label in expected if label in text]
+    minimum = max(1, int(len(expected) * 0.7))
+    if len(found) < minimum:
+        return GateResult("DXF_ROOM_DIMENSIONS", "fail", f"found {len(found)}/{len(expected)} room dimension labels")
+    return GateResult("DXF_ROOM_DIMENSIONS", "pass", f"{len(found)}/{len(expected)} room dimension labels found")
+
+
+def validate_dxf_no_raw_internal_strings(paths: Path | tuple[Path, ...] | list[Path]) -> GateResult:
+    all_paths = (paths,) if isinstance(paths, Path) else tuple(paths)
+    text = "\n".join(_dxf_text(ezdxf.readfile(path)) for path in all_paths)
+    hits = _raw_internal_hits(text)
+    if hits:
+        return GateResult("DXF_NO_RAW_INTERNAL_STRINGS", "fail", "raw/internal strings found: " + ", ".join(hits[:8]))
+    return GateResult("DXF_NO_RAW_INTERNAL_STRINGS", "pass", "no raw dict/json/internal operation strings found")
+
+
 def validate_dxf_room_labels_openings(paths: Path | tuple[Path, ...] | list[Path], project: DrawingProject) -> GateResult:
     all_paths = (paths,) if isinstance(paths, Path) else tuple(paths)
     text = ""
@@ -303,3 +399,25 @@ def validate_dxf_no_stale_golden_labels(paths: Path | tuple[Path, ...] | list[Pa
     if hits:
         return GateResult("DXF_NO_STALE_GOLDEN_LABELS", "fail", f"stale labels found: {', '.join(hits)}")
     return GateResult("DXF_NO_STALE_GOLDEN_LABELS", "pass", "no stale non-source golden dimensions found")
+
+
+def _bounds(points: tuple[tuple[float, float], ...]) -> tuple[float, float, float, float]:
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _raw_internal_hits(text: str) -> list[str]:
+    patterns = (
+        r"\{'type':",
+        r'"type"\s*:',
+        r"\{'operation':",
+        r"<DecisionValue",
+        r"source='",
+        r"assumption=",
+    )
+    hits: list[str] = []
+    for pattern in patterns:
+        if re.search(pattern, text):
+            hits.append(pattern)
+    return hits

@@ -2,7 +2,7 @@
   "style_id": "minimal_warm",
   "display_name": "Tối giản ấm",
   "version": "2026.04",
-  "aliases": ["minimal warm", "warm minimal", "tối giản ấm", "toi gian am", "hiện đại ấm", "hien dai am", "ấm tối giản", "nha gon am"],
+  "aliases": ["minimal warm", "warm minimal", "modern minimalist", "modern minimal", "modern_minimalist", "modern", "minimalist", "tối giản ấm", "toi gian am", "hiện đại ấm", "hien dai am", "ấm tối giản", "nha gon am"],
   "customer_language_signals": ["tối giản", "ấm", "gọn", "ít bảo trì", "dễ dọn", "trung tính", "nhẹ nhàng", "không cầu kỳ", "low maintenance", "nhiều lưu trữ", "dễ chăm sóc", "sạch sẽ", "ít chi tiết"],
   "visual_signals": ["warm neutral palette", "light wood", "plain walls", "soft indirect lighting", "built-in storage", "minimal facade", "flat panel cabinet", "greige wall", "concealed storage"],
   "spatial_rules": {

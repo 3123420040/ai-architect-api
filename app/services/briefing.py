@@ -15,6 +15,7 @@ PROJECT_TYPE_PATTERNS = (
 )
 
 STYLE_PATTERNS = (
+    ("minimal_warm", ("modern minimal warm", "minimal warm", "toi gian am", "hien dai toi gian am", "minimal am")),
     ("modern_minimalist", ("toi gian", "minimalist", "modern minimalist")),
     ("tropical_modern", ("tropical", "nhiet doi", "tropical modern")),
     ("indochine", ("indochine", "dong duong")),
@@ -85,11 +86,23 @@ PROJECT_MODE_LABELS = {
 }
 
 STYLE_LABELS = {
+    "minimal_warm": "Tối giản ấm",
     "modern_minimalist": "Hiện đại tối giản",
     "modern": "Hiện đại",
     "tropical_modern": "Nhiệt đới hiện đại",
     "indochine": "Indochine",
     "luxury_modern": "Hiện đại sang trọng",
+}
+
+ORIENTATION_LABELS = {
+    "north": "hướng Bắc",
+    "south": "hướng Nam",
+    "east": "hướng Đông",
+    "west": "hướng Tây",
+    "northeast": "hướng Đông Bắc",
+    "northwest": "hướng Tây Bắc",
+    "southeast": "hướng Đông Nam",
+    "southwest": "hướng Tây Nam",
 }
 
 SPECIAL_REQUEST_LABELS = {
@@ -305,16 +318,7 @@ def _format_site_detail(brief: dict[str, Any]) -> str | None:
     width = lot.get("width_m")
     depth = lot.get("depth_m")
     orientation = lot.get("orientation")
-    orientation_label = {
-        "north": "hướng Bắc",
-        "south": "hướng Nam",
-        "east": "hướng Đông",
-        "west": "hướng Tây",
-        "northeast": "hướng Đông Bắc",
-        "northwest": "hướng Tây Bắc",
-        "southeast": "hướng Đông Nam",
-        "southwest": "hướng Tây Nam",
-    }.get(orientation)
+    orientation_label = ORIENTATION_LABELS.get(orientation)
 
     if brief.get("project_type") == "apartment_reno":
         if area and orientation_label:
@@ -468,7 +472,7 @@ def analyze_message_to_brief(message: str, existing: dict | None = None) -> dict
     for orientation, keywords in ORIENTATION_PATTERNS.items():
         if _contains_any(normalized, keywords):
             lot = _merge_dict(lot, {"orientation": orientation})
-            _add_fact(facts, "orientation", "Hướng chính", _format_site_detail({"project_type": brief.get("project_type"), "lot": lot}) or "")
+            _add_fact(facts, "orientation", "Hướng chính", ORIENTATION_LABELS.get(orientation, orientation))
             break
     if lot:
         brief["lot"] = lot

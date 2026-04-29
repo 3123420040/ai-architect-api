@@ -2,7 +2,7 @@
   "style_id": "modern_tropical",
   "display_name": "Hiện đại nhiệt đới",
   "version": "2026.04",
-  "aliases": ["modern tropical", "tropical modern", "hiện đại nhiệt đới", "hiện đại xanh mát", "hien dai thoang nhieu cay", "nhà nhiệt đới hiện đại", "nha xanh hien dai"],
+  "aliases": ["modern tropical", "tropical modern", "tropical_modern", "green modern", "hiện đại nhiệt đới", "hiện đại xanh mát", "hien dai thoang nhieu cay", "nhà nhiệt đới hiện đại", "nha xanh hien dai"],
   "customer_language_signals": ["thoáng", "nhiều cây", "xanh mát", "gần gũi tự nhiên", "nhiều ánh sáng", "thông gió", "mát", "hien dai", "nhiet doi", "cây xanh trong nhà", "giếng trời", "sân trong", "ban công xanh"],
   "visual_signals": ["wood louvers", "vertical screens", "deep overhang", "balcony greenery", "large shaded glass", "courtyard planting", "natural stone", "timber screen", "pergola", "green facade", "tropical plants"],
   "spatial_rules": {

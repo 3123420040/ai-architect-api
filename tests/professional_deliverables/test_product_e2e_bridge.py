@@ -109,6 +109,11 @@ def test_professional_deliverables_api_creates_async_job(client, session_payload
     assert bundle_response.status_code == 200, bundle_response.text
     assert bundle_response.json()["bundle_id"] == payload["bundle_id"]
 
+    project_response = client.get(f"/api/v1/projects/{project_id}", headers=auth_headers(token))
+    assert project_response.status_code == 200, project_response.text
+    serialized_version = next(item for item in project_response.json()["versions"] if item["id"] == version_id)
+    assert serialized_version["current_professional_deliverable_bundle_id"] == payload["bundle_id"]
+
 
 def test_professional_deliverables_api_rejects_ineligible_version(client, session_payload):
     session = register(client, session_payload)

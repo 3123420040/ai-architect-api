@@ -140,6 +140,40 @@ def _fixture_center_size(fixture: dict[str, Any]) -> tuple[tuple[float, float], 
     return ((min_x + max_x) / 2, (min_y + max_y) / 2), (max_x - min_x, max_y - min_y)
 
 
+def _opening_operation_label(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        operation_type = str(value.get("type") or value.get("operation") or value.get("mode") or "").strip()
+        hinge_side = str(value.get("hinge_side") or value.get("swing") or "").strip()
+        sliding = bool(value.get("sliding")) or operation_type == "sliding"
+        parts: list[str] = []
+        if sliding:
+            parts.append("trượt")
+        elif operation_type in {"swing", "hinged"}:
+            parts.append("mở quay")
+        elif operation_type == "fixed":
+            parts.append("cố định")
+        elif operation_type:
+            parts.append(operation_type.replace("_", " "))
+        if hinge_side in {"left", "right"}:
+            parts.append("bản lề trái" if hinge_side == "left" else "bản lề phải")
+        return ", ".join(parts) or None
+    text = str(value).strip()
+    if not text:
+        return None
+    return {
+        "sliding": "trượt",
+        "swing": "mở quay",
+        "hinged": "mở quay",
+        "fixed": "cố định",
+        "fixed_or_sliding": "cố định hoặc trượt",
+        "sliding_or_swing": "trượt hoặc mở quay",
+        "shaded_louver": "ô thoáng lam che nắng",
+        "vent_louver": "ô thoáng thông gió",
+    }.get(text, text.replace("_", " "))
+
+
 def _style(brief_json: dict | None, geometry: dict[str, Any]) -> str:
     return str((brief_json or {}).get("style") or geometry.get("project_info", {}).get("style") or "Modern Minimalist")
 
@@ -287,7 +321,7 @@ def geometry_to_drawing_project(
                 width_m=float(item["width_m"]) if item.get("width_m") is not None else None,
                 height_m=float(item["height_m"]) if item.get("height_m") is not None else None,
                 sill_height_m=float(item["sill_height_m"]) if item.get("sill_height_m") is not None else None,
-                operation=str(item.get("operation") or item.get("swing") or "") or None,
+                operation=_opening_operation_label(item.get("operation") or item.get("swing")),
             )
         )
 

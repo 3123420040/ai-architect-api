@@ -84,6 +84,14 @@ def test_concept_pdf_and_dxf_render_from_source_geometry(tmp_path: Path):
     assert "Giả định và ghi chú style" in text
     assert "Phòng khách" in text
     assert "D-MAIN" in text or "D-L1-MAIN" in text
+    assert "{'type':" not in text
+    assert '"type":' not in text
+    assert "Modern Tropical / Hiện đại nhiệt đới" in text
+    assert "Vật liệu nền concept" in text
+    assert "Mặt tiền concept" in text
+    assert "Tầng-tầng 3.30 m" in text
+    assert "Thông thủy ~3.00 m" in text
+    assert any(" m x " in line and "m²" not in line for line in text.splitlines())
     with fitz.open(result.bundle.pdf_path) as doc:
         assert doc.page_count == len(result.drawing_package.sheets)
         for page in doc:
@@ -112,6 +120,11 @@ def test_concept_pdf_and_dxf_render_from_source_geometry(tmp_path: Path):
     schedule_text = "\n".join(entity.dxf.text for entity in schedule_doc.modelspace() if entity.dxftype() == "TEXT")
     assert "Bang phong va dien tich" in schedule_text
     assert "Phòng khách" in schedule_text
+    assert " m x " in schedule_text
+    opening_schedule_doc = ezdxf.readfile(result.bundle.two_d_dir / "A-602-door-window-schedule.dxf")
+    opening_schedule_text = "\n".join(entity.dxf.text for entity in opening_schedule_doc.modelspace() if entity.dxftype() == "TEXT")
+    assert "{'type':" not in opening_schedule_text
+    assert '"type":' not in opening_schedule_text
 
     physical_gates = validate_physical_sheet_presence(result.drawing_package, result.bundle)
     assert concept_qa_passed(physical_gates)

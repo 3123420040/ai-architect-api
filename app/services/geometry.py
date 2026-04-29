@@ -175,7 +175,8 @@ def build_geometry_v2(
     core_zone_factor = 0.16 + ((option_index + 1) % 3) * 0.015 + float(rule_overrides.get("core_zone_shift") or 0.0)
     x_split_factor = float(rule_overrides.get("x_split") or (0.57 if option_index % 2 == 0 else 0.52))
 
-    building_depth = _round(max(depth - 2.0, depth * building_depth_factor))
+    max_building_depth = 16.2 if width <= 5.5 else (17.5 if width <= 7.2 else 18.5)
+    building_depth = _round(min(max(depth - 2.0, depth * building_depth_factor), max_building_depth, depth - 1.2))
     front_buffer = _round(max((depth - building_depth) / 2, 0.6))
     rear_buffer = _round(depth - building_depth - front_buffer)
 
@@ -388,6 +389,13 @@ def build_geometry_v2(
     front_y2 = front_buffer + front_zone
     core_y2 = front_y2 + core_zone
     rear_y2 = front_buffer + building_depth
+    service_lane_width = _round(_clamp(service_width * 0.45, 1.1, min(1.6, width * 0.28)))
+    service_x = _round(width - service_lane_width)
+
+    def limited_depth(x1: float, x2: float, y1: float, y2: float, max_area: float, *, min_depth: float = 3.2) -> float:
+        width_m = max(x2 - x1, 0.5)
+        available = max(y2 - y1, min_depth)
+        return _round(min(available, max(min_depth, max_area / width_m)))
 
     for level_number, level_id in enumerate(floor_ids, start=1):
         face_walls = _face_wall_ids(level_id)
@@ -395,25 +403,42 @@ def build_geometry_v2(
             living_id = room_box(level_id, "R1", "Living Room", "living", 0.2, front_y1 + 0.2, width - 0.2, front_y2 - 0.1)
             powder_id = room_box(level_id, "R2", "Powder", "powder", 0.2, front_y2 + 0.1, x_split - 0.1, core_y2 - 0.1)
             stair_id = room_box(level_id, "R3", "Stair Hall", "circulation", x_split + 0.1, front_y2 + 0.1, width - 0.2, core_y2 - 0.1)
+            kitchen_y1 = core_y2 + 0.1
+            kitchen_min_depth = 4.0 if width >= 8.0 else 4.8
+            kitchen_y2 = _round(kitchen_y1 + limited_depth(0.2, service_x - 0.1, kitchen_y1, rear_y2 - 0.2, 34.0, min_depth=kitchen_min_depth))
             kitchen_id = room_box(
                 level_id,
                 "R4",
                 "Kitchen + Dining",
                 "kitchen",
                 0.2,
-                core_y2 + 0.1,
-                width - service_width * 0.18,
-                rear_y2 - 0.2,
+                kitchen_y1,
+                service_x - 0.1,
+                kitchen_y2,
                 extras={"fixtures_refs": ["fix_kitchen_counter", "fix_sink", "fix_cooktop"]},
             )
-            service_id = room_box(level_id, "R5", "Laundry Court", "laundry", width - service_width * 0.18, core_y2 + 0.1, width - 0.2, rear_y2 - 0.2)
+            service_id = room_box(level_id, "R5", "Laundry / Service", "laundry", service_x + 0.1, kitchen_y1, width - 0.2, kitchen_y2)
+            rear_court_id = None
+            if rear_y2 - 0.2 - kitchen_y2 >= 1.2:
+                rear_court_id = room_box(
+                    level_id,
+                    "R6",
+                    "Rear Garden Court",
+                    "terrace",
+                    0.2,
+                    kitchen_y2 + 0.1,
+                    width - 0.2,
+                    rear_y2 - 0.2,
+                )
 
             interior_walls = [
                 ("wall-front-split", (0.0, front_y2), (width, front_y2)),
                 ("wall-core-split", (0.0, core_y2), (width, core_y2)),
                 ("wall-service-core", (x_split, front_y2), (x_split, core_y2)),
-                ("wall-laundry", (width - service_width * 0.18, core_y2), (width - service_width * 0.18, rear_y2)),
+                ("wall-laundry", (service_x, kitchen_y1), (service_x, kitchen_y2)),
             ]
+            if rear_court_id:
+                interior_walls.append(("wall-rear-court", (0.0, kitchen_y2), (width, kitchen_y2)))
             for suffix, start, end in interior_walls:
                 _add_wall(
                     walls,
@@ -430,7 +455,9 @@ def build_geometry_v2(
             add_opening(level=level_id, room_id=living_id, wall_id=face_walls["south"], kind="door", subtype="entrance_double", position=width * 0.28, width_m=1.6, height_m=2.7, sill_height_m=0.0, face="south")
             add_opening(level=level_id, room_id=living_id, wall_id=face_walls["south"], kind="window", subtype="fixed_casement", position=width * 0.68, width_m=1.8, height_m=1.6, sill_height_m=0.8, face="south")
             add_opening(level=level_id, room_id=kitchen_id, wall_id=face_walls["north"], kind="window", subtype="sliding", position=width * 0.45, width_m=2.1, height_m=1.5, sill_height_m=0.9, face="north")
-            add_opening(level=level_id, room_id=service_id, wall_id=face_walls["north"], kind="door", subtype="interior_single", position=width * 0.85, width_m=0.9, height_m=2.2, sill_height_m=0.0, face="north")
+            add_opening(level=level_id, room_id=service_id, wall_id=f"{level_id}-wall-laundry", kind="door", subtype="interior_single", position=(kitchen_y2 - kitchen_y1) / 2, width_m=0.8, height_m=2.1, sill_height_m=0.0, face="interior")
+            if rear_court_id:
+                add_opening(level=level_id, room_id=rear_court_id, wall_id=f"{level_id}-wall-rear-court", kind="door", subtype="interior_single", position=width * 0.55, width_m=1.2, height_m=2.2, sill_height_m=0.0, face="interior")
             add_opening(level=level_id, room_id=powder_id, wall_id=f"{level_id}-wall-front-split", kind="door", subtype="interior_single", position=x_split * 0.35, width_m=0.8, height_m=2.1, sill_height_m=0.0, face="interior")
             add_opening(level=level_id, room_id=stair_id, wall_id=f"{level_id}-wall-front-split", kind="door", subtype="interior_single", position=x_split + service_width * 0.25, width_m=0.9, height_m=2.1, sill_height_m=0.0, face="interior")
 
@@ -508,7 +535,22 @@ def build_geometry_v2(
             bedroom_a = room_box(level_id, "R1", f"Bedroom {level_number}A", "bedroom", 0.2, front_y1 + 0.2, width - 0.2, front_y2 - 0.1)
             bath = room_box(level_id, "R2", "Bathroom", "bathroom", 0.2, front_y2 + 0.1, x_split - 0.1, core_y2 - 0.1)
             landing = room_box(level_id, "R3", "Landing", "circulation", x_split + 0.1, front_y2 + 0.1, width - 0.2, core_y2 - 0.1)
-            bedroom_b = room_box(level_id, "R4", f"Bedroom {level_number}B", "bedroom", 0.2, core_y2 + 0.1, width - 0.2, rear_y2 - 0.2)
+            rear_room_y1 = core_y2 + 0.1
+            rear_room_y2 = rear_y2 - 0.2
+            bedroom_b_y2 = _round(rear_room_y1 + limited_depth(0.2, width - 0.2, rear_room_y1, rear_room_y2, 31.0, min_depth=4.0))
+            bedroom_b = room_box(level_id, "R4", f"Bedroom {level_number}B", "bedroom", 0.2, rear_room_y1, width - 0.2, bedroom_b_y2)
+            rear_aux_id = None
+            if rear_room_y2 - bedroom_b_y2 >= 1.2:
+                rear_aux_id = room_box(
+                    level_id,
+                    "R5",
+                    "Study / Closet",
+                    "storage",
+                    0.2,
+                    bedroom_b_y2 + 0.1,
+                    width - 0.2,
+                    rear_room_y2,
+                )
 
             for suffix, start, end in [
                 ("wall-front-split", (0.0, front_y2), (width, front_y2)),
@@ -526,12 +568,26 @@ def build_geometry_v2(
                     structural=False,
                     materials=materials,
                 )
+            if rear_aux_id:
+                _add_wall(
+                    walls,
+                    wall_id=f"{level_id}-wall-rear-aux",
+                    level=level_id,
+                    start=(0.0, bedroom_b_y2),
+                    end=(width, bedroom_b_y2),
+                    wall_type="interior",
+                    thickness=0.1,
+                    structural=False,
+                    materials=materials,
+                )
 
             add_opening(level=level_id, room_id=bedroom_a, wall_id=face_walls["south"], kind="window", subtype="sliding", position=width * 0.45, width_m=2.0, height_m=1.5, sill_height_m=0.85, face="south")
-            add_opening(level=level_id, room_id=bedroom_b, wall_id=face_walls["north"], kind="window", subtype="sliding", position=width * 0.45, width_m=1.8, height_m=1.5, sill_height_m=0.85, face="north")
+            add_opening(level=level_id, room_id=bedroom_b, wall_id=f"{level_id}-wall-rear-aux" if rear_aux_id else face_walls["north"], kind="window", subtype="sliding", position=width * 0.45, width_m=1.8, height_m=1.5, sill_height_m=0.85, face="north" if not rear_aux_id else "interior")
             add_opening(level=level_id, room_id=bedroom_a, wall_id=f"{level_id}-wall-front-split", kind="door", subtype="interior_single", position=width * 0.32, width_m=0.9, height_m=2.1, sill_height_m=0.0, face="interior")
             add_opening(level=level_id, room_id=bath, wall_id=f"{level_id}-wall-front-split", kind="door", subtype="interior_single", position=x_split * 0.32, width_m=0.8, height_m=2.1, sill_height_m=0.0, face="interior")
             add_opening(level=level_id, room_id=bedroom_b, wall_id=f"{level_id}-wall-core-split", kind="door", subtype="interior_single", position=width * 0.62, width_m=0.9, height_m=2.1, sill_height_m=0.0, face="interior")
+            if rear_aux_id:
+                add_opening(level=level_id, room_id=rear_aux_id, wall_id=f"{level_id}-wall-rear-aux", kind="door", subtype="interior_single", position=width * 0.62, width_m=0.8, height_m=2.1, sill_height_m=0.0, face="interior")
             add_opening(level=level_id, room_id=landing, wall_id=face_walls["east"], kind="window", subtype="fixed_casement", position=front_zone + (core_zone / 2), width_m=0.8, height_m=1.2, sill_height_m=1.0, face="east")
 
             stairs.append(
@@ -587,7 +643,19 @@ def build_geometry_v2(
         lounge = room_box(level_id, "R2", "Family Lounge", "living", width * 0.6 + 0.1, front_y1 + 0.2, width - 0.2, front_y2 - 0.1)
         laundry = room_box(level_id, "R3", "Laundry", "laundry", 0.2, front_y2 + 0.1, x_split - 0.1, core_y2 - 0.1)
         landing = room_box(level_id, "R4", "Landing", "circulation", x_split + 0.1, front_y2 + 0.1, width - 0.2, core_y2 - 0.1)
-        terrace = room_box(level_id, "R5", "Roof Terrace", "terrace", 0.2, core_y2 + 0.1, width - 0.2, rear_y2 - 0.2)
+        terrace_y1 = core_y2 + 0.1
+        terrace_y2 = _round(terrace_y1 + limited_depth(0.2, width - 0.2, terrace_y1, rear_y2 - 0.2, 34.0, min_depth=3.8))
+        terrace = room_box(level_id, "R5", "Roof Terrace", "terrace", 0.2, terrace_y1, width - 0.2, terrace_y2)
+        planter_deck_ids: list[str] = []
+        if rear_y2 - 0.2 - terrace_y2 >= 1.2:
+            deck_y1 = terrace_y2 + 0.1
+            deck_y2 = rear_y2 - 0.2
+            deck_area = (width - 0.4) * max(deck_y2 - deck_y1, 0.0)
+            if deck_area >= 38.0 and width >= 6.4:
+                planter_deck_ids.append(room_box(level_id, "R6", "Planter Court", "terrace", 0.2, deck_y1, x_split - 0.1, deck_y2))
+                planter_deck_ids.append(room_box(level_id, "R7", "Service Deck", "terrace", x_split + 0.1, deck_y1, width - 0.2, deck_y2))
+            else:
+                planter_deck_ids.append(room_box(level_id, "R6", "Planter / Service Deck", "terrace", 0.2, deck_y1, width - 0.2, deck_y2))
 
         for suffix, start, end in [
             ("wall-front-split", (0.0, front_y2), (width, front_y2)),
@@ -606,10 +674,47 @@ def build_geometry_v2(
                 structural=False,
                 materials=materials,
             )
+        if planter_deck_ids:
+            _add_wall(
+                walls,
+                wall_id=f"{level_id}-wall-planter-deck",
+                level=level_id,
+                start=(0.0, terrace_y2),
+                end=(width, terrace_y2),
+                wall_type="interior",
+                thickness=0.1,
+                structural=False,
+                materials=materials,
+            )
+            if len(planter_deck_ids) > 1:
+                _add_wall(
+                    walls,
+                    wall_id=f"{level_id}-wall-deck-split",
+                    level=level_id,
+                    start=(x_split, terrace_y2),
+                    end=(x_split, rear_y2),
+                    wall_type="interior",
+                    thickness=0.1,
+                    structural=False,
+                    materials=materials,
+                )
 
         add_opening(level=level_id, room_id=worship, wall_id=face_walls["south"], kind="window", subtype="sliding", position=width * 0.25, width_m=1.6, height_m=1.5, sill_height_m=0.85, face="south")
         add_opening(level=level_id, room_id=lounge, wall_id=face_walls["south"], kind="door", subtype="entrance_double", position=width * 0.78, width_m=1.4, height_m=2.5, sill_height_m=0.0, face="south")
-        add_opening(level=level_id, room_id=terrace, wall_id=face_walls["north"], kind="window", subtype="sliding", position=width * 0.5, width_m=2.4, height_m=1.8, sill_height_m=0.4, face="north")
+        add_opening(level=level_id, room_id=terrace, wall_id=f"{level_id}-wall-planter-deck" if planter_deck_ids else face_walls["north"], kind="window", subtype="sliding", position=width * 0.5, width_m=2.4, height_m=1.8, sill_height_m=0.4, face="north" if not planter_deck_ids else "interior")
+        for deck_index, deck_room_id in enumerate(planter_deck_ids):
+            add_opening(
+                level=level_id,
+                room_id=deck_room_id,
+                wall_id=f"{level_id}-wall-planter-deck",
+                kind="door",
+                subtype="interior_single",
+                position=width * (0.38 if deck_index == 0 else 0.72),
+                width_m=0.9,
+                height_m=2.1,
+                sill_height_m=0.0,
+                face="interior",
+            )
         add_opening(level=level_id, room_id=laundry, wall_id=f"{level_id}-wall-front-split", kind="door", subtype="interior_single", position=x_split * 0.38, width_m=0.8, height_m=2.1, sill_height_m=0.0, face="interior")
         add_opening(level=level_id, room_id=landing, wall_id=f"{level_id}-wall-front-split", kind="door", subtype="interior_single", position=x_split + service_width * 0.25, width_m=0.9, height_m=2.1, sill_height_m=0.0, face="interior")
 

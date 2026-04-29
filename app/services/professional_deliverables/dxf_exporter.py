@@ -62,6 +62,57 @@ def _wrapped_text(value: object, *, max_chars: int = 92) -> list[str]:
     return lines or [""]
 
 
+def _customer_style_label(project: DrawingProject) -> str:
+    metadata = project.style_metadata or {}
+    label = metadata.get("customer_style_label") or metadata.get("style_display_name") or metadata.get("style_name") or project.style
+    return str(label).replace("_", " ").strip() or "Concept style"
+
+
+def _operation_display_label(operation: object | None) -> str:
+    if operation is None:
+        return "concept"
+    if isinstance(operation, dict):
+        operation_type = str(operation.get("type") or operation.get("operation") or operation.get("mode") or "").strip()
+        hinge_side = str(operation.get("hinge_side") or operation.get("swing") or "").strip()
+        parts: list[str] = []
+        if operation_type == "sliding" or operation.get("sliding"):
+            parts.append("truot")
+        elif operation_type in {"swing", "hinged"}:
+            parts.append("mo quay")
+        elif operation_type == "fixed":
+            parts.append("co dinh")
+        elif operation_type:
+            parts.append(operation_type.replace("_", " "))
+        if hinge_side in {"left", "right"}:
+            parts.append("ban le trai" if hinge_side == "left" else "ban le phai")
+        return ", ".join(parts) or "concept"
+    text = str(operation).strip()
+    if not text:
+        return "concept"
+    return {
+        "sliding": "truot",
+        "swing": "mo quay",
+        "hinged": "mo quay",
+        "fixed": "co dinh",
+        "fixed_or_sliding": "co dinh hoac truot",
+        "sliding_or_swing": "truot hoac mo quay",
+        "shaded_louver": "lam che nang",
+        "vent_louver": "o thoang thong gio",
+        "unspecified": "concept",
+    }.get(text, text.replace("_", " "))
+
+
+def _bounds_m(points) -> tuple[float, float, float, float]:
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _room_size_label(room) -> str:
+    min_x, min_y, max_x, max_y = _bounds_m(room.polygon)
+    return f"{format_dimension_m(max_x - min_x)} x {format_dimension_m(max_y - min_y)}"
+
+
 def _draw_title_note(msp, project: DrawingProject, sheet: SheetSpec) -> None:
     title_width = _sheet_content_width(project, sheet)
     left = -1.4
@@ -166,6 +217,7 @@ def _draw_floorplan(msp, project: DrawingProject, floor: int) -> None:
         )
         _add_text(msp, room.name, (cx - label_width / 2 + 0.08, cy + 0.08), height=0.16, layer="A-AREA-IDEN")
         _add_text(msp, f"{room.display_area_m2:.1f} m²", (cx - label_width / 2 + 0.08, cy - 0.18), height=0.12, layer="A-AREA-IDEN")
+        _add_text(msp, _room_size_label(room), (cx - label_width / 2 + 0.08, cy - 0.42), height=0.11, layer="A-ANNO-DIMS")
     for opening in project.openings_for_floor(floor):
         _draw_opening(msp, opening)
     for fixture in project.fixtures_for_floor(floor):
@@ -180,12 +232,17 @@ def _draw_floorplan(msp, project: DrawingProject, floor: int) -> None:
     _add_polyline(msp, [(0.1, project.lot_depth_m * 0.55), (min(2.0, project.lot_width_m * 0.45), project.lot_depth_m * 0.72)], layer="A-ANNO-NPLT")
     _draw_dimensions(msp, project)
     _draw_north_arrow(msp, (project.lot_width_m + 0.85, max(project.lot_depth_m - 1.5, 0.8)), project.north_angle_degrees)
+    _add_text(msp, f"Tang {floor}: kich thuoc phong nam trong nhan phong de review ty le.", (0.0, project.lot_depth_m + 0.55), height=0.14, layer="A-ANNO-TEXT")
 
 
 def _draw_site(msp, project: DrawingProject) -> None:
     _add_polyline(msp, project.site_polygon, layer="L-SITE", closed=True, lineweight=35)
     _add_polyline(msp, project.roof_outline, layer="A-ROOF", closed=True, lineweight=25)
     _add_polyline(msp, project.site_polygon, layer="A-WALL", closed=True, lineweight=35)
+    _add_polyline(msp, [(0.0, -1.12), (project.lot_width_m, -1.12), (project.lot_width_m, -0.68), (0.0, -0.68)], layer="A-ANNO-NPLT", closed=True, lineweight=12)
+    _add_polyline(msp, [(project.lot_width_m / 2, -0.68), (project.lot_width_m / 2, 0.2)], layer="A-ANNO-NPLT", lineweight=18)
+    _add_text(msp, "Duong tiep can / mat tien", (0.2, -1.55), height=0.16, layer="A-ANNO-TEXT")
+    _add_text(msp, "Loi vao chinh", (project.lot_width_m / 2 + 0.18, 0.18), height=0.14, layer="A-ANNO-TEXT")
     for x, y in (
         (0.5, -0.5),
         (max(project.lot_width_m - 0.5, 0.5), -0.5),
@@ -235,12 +292,40 @@ def _draw_elevations(msp, project: DrawingProject) -> None:
     for label, ox, oy, width in specs:
         _add_polyline(msp, [(ox - 0.25, oy - 0.35), (ox + max_width + 0.25, oy - 0.35), (ox + max_width + 0.25, oy + height + 0.7), (ox - 0.25, oy + height + 0.7)], layer="A-ANNO-NPLT", closed=True, lineweight=9)
         _add_polyline(msp, [(ox, oy), (ox + width, oy), (ox + width, oy + height), (ox, oy + height)], layer="A-ELEV-OTLN", closed=True, lineweight=35)
+        family = _style_family(project)
+        for level in range(project.storeys):
+            base_y = oy + level * 3.3 + 0.15
+            panel_x1 = ox + width * (0.08 if level % 2 == 0 else 0.54)
+            panel_x2 = min(ox + width - 0.08, panel_x1 + max(width * 0.34, 0.9))
+            _add_polyline(msp, [(panel_x1, base_y), (panel_x2, base_y), (panel_x2, base_y + 2.95), (panel_x1, base_y + 2.95)], layer="A-ELEV-OTLN", closed=True, lineweight=9)
+            opening_w = min(max(width * 0.28, 0.9), 2.2)
+            win_x1 = max(ox + 0.25, min(ox + width - opening_w - 0.25, panel_x1 + 0.25))
+            win_y1 = base_y + 0.85
+            _add_polyline(msp, [(win_x1, win_y1), (win_x1 + opening_w, win_y1), (win_x1 + opening_w, win_y1 + 1.15), (win_x1, win_y1 + 1.15)], layer="A-GLAZ", closed=True, lineweight=18)
+            if level > 0:
+                _add_polyline(msp, [(win_x1 - 0.15, base_y + 0.45), (win_x1 + opening_w + 0.15, base_y + 0.45)], layer="A-ROOF", lineweight=18)
+            if family in {"tropical", "indochine"}:
+                for index in range(4 if family == "tropical" else 3):
+                    fin_x = win_x1 + opening_w + 0.16 + index * 0.12
+                    if fin_x < ox + width - 0.12:
+                        _add_polyline(msp, [(fin_x, win_y1 - 0.08), (fin_x, win_y1 + 1.3)], layer="A-ELEV-OTLN", lineweight=13)
         for level in range(1, project.storeys + 1):
             _add_polyline(msp, [(ox, oy + level * 3.3), (ox + width, oy + level * 3.3)], layer="A-ELEV-OTLN", lineweight=13)
             _add_text(msp, f"L{level}", (ox + width + 0.18, oy + level * 3.3 - 0.06), height=0.12, layer="A-ANNO-TEXT")
-        _add_polyline(msp, [(ox + width * 0.2, oy + 1.0), (ox + width * 0.4, oy + 1.0), (ox + width * 0.4, oy + 2.3), (ox + width * 0.2, oy + 2.3)], layer="A-GLAZ", closed=True, lineweight=18)
-        _add_polyline(msp, [(ox + width * 0.62, oy + 4.2), (ox + width * 0.82, oy + 4.2), (ox + width * 0.82, oy + 5.5), (ox + width * 0.62, oy + 5.5)], layer="A-GLAZ", closed=True, lineweight=18)
         _add_text(msp, f"Mặt đứng {label}", (ox, oy + height + 0.28), height=0.18, layer="A-ANNO-TEXT")
+    _add_text(msp, f"Style concept: {_customer_style_label(project)}", (0.0, upper_y + height + 0.8), height=0.16, layer="A-ANNO-TEXT")
+    _add_text(msp, "Mat tien: nhan manh lop vat lieu, ban cong/lam che nang va cua theo style concept.", (0.0, upper_y + height + 0.45), height=0.13, layer="A-ANNO-TEXT")
+
+
+def _style_family(project: DrawingProject) -> str:
+    metadata = project.style_metadata or {}
+    style_id = str(metadata.get("style_id") or project.style).lower()
+    label = _customer_style_label(project).lower()
+    if "tropical" in style_id or "nhiet doi" in label or "nhiệt đới" in label:
+        return "tropical"
+    if "indochine" in style_id or "dong duong" in label or "đông dương" in label:
+        return "indochine"
+    return "minimal"
 
 
 def _draw_sections(msp, project: DrawingProject) -> None:
@@ -253,20 +338,25 @@ def _draw_sections(msp, project: DrawingProject) -> None:
         for level in range(1, project.storeys + 1):
             _add_polyline(msp, [(ox, level * 3.3), (ox + width, level * 3.3)], layer="A-SECT-OTLN", lineweight=18)
             _add_text(msp, f"Cao độ L{level}", (ox + width + 0.18, level * 3.3 - 0.06), height=0.12, layer="A-ANNO-TEXT")
+            _add_polyline(msp, [(ox + width + 0.55, (level - 1) * 3.3), (ox + width + 0.55, level * 3.3)], layer="A-ANNO-DIMS", lineweight=13)
+            _add_text(msp, "Tang-tang 3.30 m", (ox + width + 0.72, (level - 0.5) * 3.3 + 0.08), height=0.12, layer="A-ANNO-DIMS")
+            _add_text(msp, "Thong thuy ~3.00 m", (ox + width + 0.72, (level - 0.5) * 3.3 - 0.18), height=0.11, layer="A-ANNO-DIMS")
         _add_polyline(msp, [(ox + 0.5, 0.2), (ox + 2.2, 3.1), (ox + 0.5, 3.1), (ox + 2.2, 6.4)], layer="A-SECT-OTLN", lineweight=18)
+        _add_text(msp, "Mat cat qua loi thang/gieng troi concept", (ox + 0.3, 0.35), height=0.12, layer="A-ANNO-TEXT")
+        _add_text(msp, "Mai/parapet concept", (ox + 0.3, height - 0.35), height=0.12, layer="A-ANNO-TEXT")
         _add_text(msp, label, (ox, height + 0.28), height=0.18, layer="A-ANNO-TEXT")
 
 
 def _draw_room_area_schedule(msp, project: DrawingProject) -> None:
     _add_text(msp, "Bang phong va dien tich", (0.0, 10.0), height=0.24, layer="A-ANNO-TEXT")
     y = 9.45
-    widths = (1.3, 4.4, 3.0, 1.7, 4.6)
-    _draw_table(msp, ("Tang", "Phong", "Loai", "Dien tich", "Ghi chu"), widths, 0.0, y, header_layer="A-AREA-IDEN")
+    widths = (1.2, 3.7, 2.2, 2.4, 1.5, 3.8)
+    _draw_table(msp, ("Tang", "Phong", "Loai", "Kich thuoc", "Dien tich", "Ghi chu"), widths, 0.0, y, header_layer="A-AREA-IDEN")
     y -= 0.45
     for room in project.rooms:
         _draw_table(
             msp,
-            (f"Tang {room.floor}", room.name, room.original_type or room.category or "-", f"{room.display_area_m2:.1f} m2", "polygon concept"),
+            (f"Tang {room.floor}", room.name, room.original_type or room.category or "-", _room_size_label(room), f"{room.display_area_m2:.1f} m2", "polygon concept"),
             widths,
             0.0,
             y,
@@ -275,7 +365,7 @@ def _draw_room_area_schedule(msp, project: DrawingProject) -> None:
         )
         y -= 0.38
     total_area = sum(room.display_area_m2 for room in project.rooms)
-    _draw_table(msp, ("", "Tong dien tich phong concept", "", f"{total_area:.1f} m2", "khong thay the do dac"), widths, 0.0, y, header_layer="A-AREA-IDEN", text_height=0.13)
+    _draw_table(msp, ("", "Tong dien tich phong concept", "", "", f"{total_area:.1f} m2", "khong thay the do dac"), widths, 0.0, y, header_layer="A-AREA-IDEN", text_height=0.13)
 
 
 def _draw_door_window_schedule(msp, project: DrawingProject) -> None:
@@ -293,7 +383,7 @@ def _draw_door_window_schedule(msp, project: DrawingProject) -> None:
                 "Cua di" if opening.kind == "door" else "Cua so",
                 f"{opening.width_m or 0:.2f} m",
                 f"{opening.height_m or 0:.2f} m",
-                opening.operation or "concept",
+                _operation_display_label(opening.operation),
             ),
             widths,
             0.0,
@@ -308,17 +398,25 @@ def _draw_assumptions_style_notes(msp, project: DrawingProject) -> None:
     metadata = project.style_metadata or {}
     _add_text(msp, "Gia dinh va ghi chu style", (0.0, 10.0), height=0.24, layer="A-ANNO-TEXT")
     _add_text(msp, f"Style ID: {metadata.get('style_id') or project.style}", (0.0, 9.45), height=0.16, layer="A-ANNO-TEXT")
-    y = 9.08
-    note_lines = [str(metadata.get("facade_strategy") or "Facade strategy follows concept style/profile.")]
+    _add_text(msp, f"Phong cach khach doc: {_customer_style_label(project)}", (0.0, 9.16), height=0.14, layer="A-ANNO-TEXT")
+    y = 8.86
+    note_lines = [f"Mat tien concept: {metadata.get('facade_strategy') or metadata.get('facade_intent') or 'theo style/profile concept.'}"]
     note_lines.extend(str(note) for note in tuple(metadata.get("drawing_notes") or ())[:4])
     palette = metadata.get("material_palette") or {}
     if isinstance(palette, dict):
         base = ", ".join(str(item) for item in palette.get("base", ())[:3])
         accent = ", ".join(str(item) for item in palette.get("accent", ())[:3])
         if base:
-            note_lines.append(f"Base palette: {base}")
+            note_lines.append(f"Vat lieu nen concept: {base}")
         if accent:
-            note_lines.append(f"Accent palette: {accent}")
+            note_lines.append(f"Vat lieu/diem nhan concept: {accent}")
+    facade_rules = metadata.get("facade_rules") or {}
+    if isinstance(facade_rules, dict):
+        for key in ("massing", "screening", "greenery", "expression"):
+            value = facade_rules.get(key)
+            if value:
+                note_lines.append(f"Luat mat tien - {key}: {value}")
+    note_lines.extend(str(warning) for warning in tuple(metadata.get("planning_warnings") or ()))
     for note in note_lines:
         for line in _wrapped_text(note, max_chars=120):
             _add_text(msp, line, (0.0, y), height=0.13, layer="A-ANNO-TEXT")

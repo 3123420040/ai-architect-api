@@ -93,10 +93,50 @@ def _fit_text(value: str, max_width: float, *, size: float, bold: bool = False) 
     return (output.rstrip() + suffix) if output else suffix
 
 
+def _customer_style_label(project: DrawingProject) -> str:
+    metadata = project.style_metadata or {}
+    label = metadata.get("customer_style_label") or metadata.get("style_display_name") or metadata.get("style_name") or project.style
+    return str(label).replace("_", " ").strip() or "Concept style"
+
+
+def _operation_display_label(operation: object | None) -> str:
+    if operation is None:
+        return "concept"
+    if isinstance(operation, dict):
+        operation_type = str(operation.get("type") or operation.get("operation") or operation.get("mode") or "").strip()
+        hinge_side = str(operation.get("hinge_side") or operation.get("swing") or "").strip()
+        parts: list[str] = []
+        if operation_type == "sliding" or operation.get("sliding"):
+            parts.append("trượt")
+        elif operation_type in {"swing", "hinged"}:
+            parts.append("mở quay")
+        elif operation_type == "fixed":
+            parts.append("cố định")
+        elif operation_type:
+            parts.append(operation_type.replace("_", " "))
+        if hinge_side in {"left", "right"}:
+            parts.append("bản lề trái" if hinge_side == "left" else "bản lề phải")
+        return ", ".join(parts) or "concept"
+    text = str(operation).strip()
+    if not text:
+        return "concept"
+    return {
+        "sliding": "trượt",
+        "swing": "mở quay",
+        "hinged": "mở quay",
+        "fixed": "cố định",
+        "fixed_or_sliding": "cố định hoặc trượt",
+        "sliding_or_swing": "trượt hoặc mở quay",
+        "shaded_louver": "lam che nắng",
+        "vent_louver": "ô thoáng thông gió",
+        "unspecified": "concept",
+    }.get(text, text.replace("_", " "))
+
+
 def _project_descriptor(project: DrawingProject) -> str:
     return (
         f"{format_compact_m(project.lot_width_m)} m x {format_compact_m(project.lot_depth_m)} m"
-        f" | {project.storeys} tầng | {project.style}"
+        f" | {project.storeys} tầng | {_customer_style_label(project)}"
     )
 
 
@@ -221,10 +261,20 @@ def _wrapped_lines(value: str, *, max_chars: int = 92) -> list[str]:
     return lines or [""]
 
 
-def _draw_text_lines(c: canvas.Canvas, lines: list[str] | tuple[str, ...], x: float, y: float, *, size: float = 8, leading: float = 13, bold: bool = False) -> float:
+def _draw_text_lines(
+    c: canvas.Canvas,
+    lines: list[str] | tuple[str, ...],
+    x: float,
+    y: float,
+    *,
+    size: float = 8,
+    leading: float = 13,
+    bold: bool = False,
+    color=colors.black,
+) -> float:
     cursor = y
     for line in lines:
-        _text(c, line, x, cursor, size=size, bold=bold)
+        _text(c, line, x, cursor, size=size, bold=bold, color=color)
         cursor -= leading
     return cursor
 
@@ -234,6 +284,19 @@ def _point_bounds(points: tuple[tuple[float, float], ...] | list[tuple[float, fl
     xs = [point[0] for point in transformed]
     ys = [point[1] for point in transformed]
     return min(xs), min(ys), max(xs), max(ys)
+
+
+def _bounds_m(points: tuple[tuple[float, float], ...] | list[tuple[float, float]]) -> tuple[float, float, float, float]:
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _room_size_label(room) -> str:
+    min_x, min_y, max_x, max_y = _bounds_m(room.polygon)
+    width_m = max_x - min_x
+    depth_m = max_y - min_y
+    return f"{format_dimension_m(width_m)} x {format_dimension_m(depth_m)}"
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:
@@ -247,7 +310,7 @@ def _draw_room_label(c: canvas.Canvas, room, tx: Callable[[float, float], tuple[
     room_width = max_x - min_x
     room_height = max_y - min_y
     label_width = min(max(room_width - 8, 58), 132)
-    label_height = 25 if room_height >= 34 else 20
+    label_height = 34 if room_height >= 42 else 27
     label_size = 7.1 if label_width >= 78 and room_height >= 34 else 5.9
     area_size = max(5.4, label_size - 0.8)
     center_x, center_y = tx(*room.center)
@@ -258,7 +321,9 @@ def _draw_room_label(c: canvas.Canvas, room, tx: Callable[[float, float], tuple[
     c.setLineWidth(0.35)
     c.roundRect(box_x, box_y, label_width, label_height, 3, stroke=1, fill=1)
     _text(c, _fit_text(room.name, label_width - 8, size=label_size, bold=True), box_x + 4, box_y + label_height - 10, size=label_size, bold=True, color=colors.darkmagenta)
-    _text(c, f"{room.display_area_m2:.1f} m²", box_x + 4, box_y + 5, size=area_size, color=colors.darkmagenta)
+    _text(c, f"{room.display_area_m2:.1f} m²", box_x + 4, box_y + label_height - 20, size=area_size, color=colors.darkmagenta)
+    if label_height >= 30:
+        _text(c, _fit_text(_room_size_label(room), label_width - 8, size=area_size), box_x + 4, box_y + 5, size=area_size, color=colors.darkmagenta)
 
 
 def _draw_plan_key(c: canvas.Canvas, project: DrawingProject) -> None:
@@ -287,7 +352,7 @@ def _draw_plan_key(c: canvas.Canvas, project: DrawingProject) -> None:
     c.setFillColor(colors.white)
     c.setStrokeColor(colors.HexColor("#d0d7de"))
     c.roundRect(x + 8, y + 10, width - 16, 20, 3, stroke=1, fill=1)
-    _text(c, _fit_text(project.style, width - 24, size=6.3), x + 12, y + 17, size=6.3, color=MUTED_INK)
+    _text(c, _fit_text(_customer_style_label(project), width - 24, size=6.3), x + 12, y + 17, size=6.3, color=MUTED_INK)
 
 
 def _draw_cover_index(c: canvas.Canvas, project: DrawingProject, sheets: tuple[SheetSpec, ...]) -> None:
@@ -300,7 +365,7 @@ def _draw_cover_index(c: canvas.Canvas, project: DrawingProject, sheets: tuple[S
         [
             project.concept_note,
             f"Quy mô concept: {format_compact_m(project.lot_width_m)} m x {format_compact_m(project.lot_depth_m)} m, {project.storeys} tầng",
-            f"Phong cách định hướng: {project.style}",
+            f"Phong cách định hướng: {_customer_style_label(project)}",
         ],
         x,
         y,
@@ -429,6 +494,7 @@ def _draw_floorplan(c: canvas.Canvas, project: DrawingProject, sheet: SheetSpec)
         _draw_fixture(c, fixture, tx, scale=scale)
     for room in project.rooms_for_floor(sheet.floor):
         _draw_room_label(c, room, tx)
+    _draw_floorplan_intent_notes(c, project, sheet.floor)
     _draw_dimensions(c, project, tx)
     _draw_north_arrow(c, PAGE_SIZE[0] - 112, PAGE_SIZE[1] - 122, project.north_angle_degrees)
     _draw_plan_key(c, project)
@@ -438,6 +504,28 @@ def _draw_site(c: canvas.Canvas, project: DrawingProject) -> None:
     tx = _transform(project)
     _poly(c, project.site_polygon, tx, close=True, stroke=colors.brown, width=1.5, fill=SITE_FILL)
     _poly(c, project.roof_outline, tx, close=True, stroke=INK, width=1.2)
+    road_y1 = -1.12
+    road_y2 = -0.68
+    road_points = ((0.0, road_y1), (project.lot_width_m, road_y1), (project.lot_width_m, road_y2), (0.0, road_y2))
+    _poly(c, road_points, tx, close=True, stroke=colors.HexColor("#8a8f98"), width=0.6, fill=colors.HexColor("#f0f1f2"))
+    entry_x, entry_y = tx(project.lot_width_m / 2.0, -0.66)
+    lot_entry_x, lot_entry_y = tx(project.lot_width_m / 2.0, 0.18)
+    c.setStrokeColor(colors.HexColor("#1a73e8"))
+    c.setLineWidth(1.0)
+    c.line(entry_x, entry_y, lot_entry_x, lot_entry_y)
+    c.line(lot_entry_x, lot_entry_y, lot_entry_x - 5, lot_entry_y - 7)
+    c.line(lot_entry_x, lot_entry_y, lot_entry_x + 5, lot_entry_y - 7)
+    _text(c, "Đường tiếp cận / mặt tiền", entry_x - 44, entry_y - 12, size=6.4, color=colors.HexColor("#1a73e8"))
+    _text(c, "Lối vào chính", lot_entry_x + 6, lot_entry_y + 3, size=6.4, color=colors.HexColor("#1a73e8"))
+    setback = (project.setbacks or {}).get("front_m") if isinstance(project.setbacks, dict) else None
+    if setback is not None:
+        sx1, sy1 = tx(0, float(setback))
+        sx2, sy2 = tx(project.lot_width_m, float(setback))
+        c.setDash(3, 2)
+        c.setStrokeColor(colors.HexColor("#6f42c1"))
+        c.line(sx1, sy1, sx2, sy2)
+        c.setDash()
+        _text(c, f"Lùi trước {format_dimension_m(float(setback))}", sx1 + 4, sy1 + 4, size=6.2, color=colors.HexColor("#6f42c1"))
     label_x, label_y = tx(0.2, project.lot_depth_m + 0.25)
     _text(
         c,
@@ -452,6 +540,25 @@ def _draw_site(c: canvas.Canvas, project: DrawingProject) -> None:
     _draw_plan_key(c, project)
 
 
+def _draw_floorplan_intent_notes(c: canvas.Canvas, project: DrawingProject, floor: int) -> None:
+    rooms = project.rooms_for_floor(floor)
+    if not rooms:
+        return
+    x = MARGIN + 16
+    y = CONTENT_TOP - 80
+    lines = [
+        f"Tầng {floor}: kích thước phòng ghi trong từng nhãn để khách kiểm tra tỷ lệ sử dụng.",
+        "Mũi cửa/cửa sổ là vị trí concept; chi tiết mở quay/trượt sẽ xác nhận ở bước thiết kế tiếp theo.",
+    ]
+    if any(room.original_type == "stair_lightwell" for room in rooms):
+        lines.append("Lõi thang/giếng trời là trục lấy sáng và thông gió chính.")
+    c.setFillColor(NOTE_FILL)
+    c.setStrokeColor(colors.HexColor("#d0d7de"))
+    c.setLineWidth(0.4)
+    c.roundRect(x - 8, y - 45, 248, 56, 4, stroke=1, fill=1)
+    _draw_text_lines(c, [_fit_text(line, 236, size=6.4) for line in lines[:3]], x, y, size=6.4, leading=13, color=INK)
+
+
 def _mini_transform(x0: float, y0: float, scale: float = SCALE_1_100_PT_PER_M) -> Callable[[float, float], tuple[float, float]]:
     def tx(x: float, y: float) -> tuple[float, float]:
         return x0 + x * scale, y0 + y * scale
@@ -459,13 +566,79 @@ def _mini_transform(x0: float, y0: float, scale: float = SCALE_1_100_PT_PER_M) -
     return tx
 
 
+def _style_family(project: DrawingProject) -> str:
+    metadata = project.style_metadata or {}
+    style_id = str(metadata.get("style_id") or project.style).lower()
+    label = _customer_style_label(project).lower()
+    if "tropical" in style_id or "nhiệt đới" in label or "nhiet doi" in label:
+        return "tropical"
+    if "indochine" in style_id or "đông dương" in label or "dong duong" in label:
+        return "indochine"
+    return "minimal"
+
+
+def _draw_style_facade_features(c: canvas.Canvas, project: DrawingProject, tx: Callable[[float, float], tuple[float, float]], width_m: float, height_m: float) -> None:
+    family = _style_family(project)
+    base_fill = {
+        "tropical": colors.HexColor("#eef6ef"),
+        "indochine": colors.HexColor("#f4ead8"),
+        "minimal": colors.HexColor("#f2f0ea"),
+    }[family]
+    accent = {
+        "tropical": colors.HexColor("#6aa874"),
+        "indochine": colors.HexColor("#8b5e34"),
+        "minimal": colors.HexColor("#b9976b"),
+    }[family]
+    screen = {
+        "tropical": colors.HexColor("#9c6b3f"),
+        "indochine": colors.HexColor("#5f3b24"),
+        "minimal": colors.HexColor("#c6ad88"),
+    }[family]
+    _poly(c, [(0, 0), (width_m, 0), (width_m, height_m), (0, height_m)], tx, close=True, stroke=INK, width=1.35, fill=base_fill)
+    for level in range(project.storeys):
+        y1 = level * 3.3 + 0.15
+        y2 = min(y1 + 3.0, height_m - 0.1)
+        panel_x1 = width_m * (0.08 if level % 2 == 0 else 0.54)
+        panel_x2 = min(width_m - 0.08, panel_x1 + max(width_m * 0.34, 0.9))
+        _poly(c, [(panel_x1, y1), (panel_x2, y1), (panel_x2, y2), (panel_x1, y2)], tx, close=True, stroke=colors.HexColor("#d6d0c5"), width=0.4, fill=colors.HexColor("#fbfaf7"))
+        opening_w = min(max(width_m * 0.28, 0.9), 2.2)
+        ox1 = max(0.25, min(width_m - opening_w - 0.25, panel_x1 + 0.25))
+        oy1 = y1 + 0.85
+        _poly(c, [(ox1, oy1), (ox1 + opening_w, oy1), (ox1 + opening_w, oy1 + 1.15), (ox1, oy1 + 1.15)], tx, close=True, stroke=colors.darkcyan, width=0.9, fill=colors.HexColor("#e8f5f7"))
+        if level > 0:
+            balcony_x1 = max(0.15, ox1 - 0.2)
+            balcony_x2 = min(width_m - 0.15, ox1 + opening_w + 0.2)
+            _poly(c, [(balcony_x1, y1 + 0.55), (balcony_x2, y1 + 0.55)], tx, stroke=accent, width=1.3)
+            _poly(c, [(balcony_x1, y1 + 0.32), (balcony_x2, y1 + 0.32), (balcony_x2, y1 + 0.55), (balcony_x1, y1 + 0.55)], tx, close=True, stroke=accent, width=0.5, fill=colors.HexColor("#edf7ed") if family == "tropical" else colors.HexColor("#f4efe6"))
+        if family in {"tropical", "indochine"}:
+            fin_count = 4 if family == "tropical" else 3
+            fin_x = min(width_m - 0.22, ox1 + opening_w + 0.18)
+            for index in range(fin_count):
+                fx = fin_x + index * 0.12
+                if fx < width_m - 0.12:
+                    _poly(c, [(fx, oy1 - 0.08), (fx, oy1 + 1.3)], tx, stroke=screen, width=0.7)
+        elif level % 2 == 0:
+            _poly(c, [(0.15, y1 + 0.2), (width_m - 0.15, y1 + 0.2)], tx, stroke=screen, width=1.0)
+    if family == "tropical":
+        for gx in (width_m * 0.18, width_m * 0.58):
+            for gy in (height_m - 1.1, max(1.2, height_m - 4.4)):
+                _poly(c, [(gx, gy), (gx + 0.35, gy + 0.5), (gx + 0.7, gy)], tx, stroke=accent, width=0.7, fill=colors.HexColor("#dff0df"))
+    if family == "indochine":
+        arch_w = min(1.2, width_m * 0.28)
+        ax1 = width_m * 0.12
+        ay1 = 0.95
+        x1, y1 = tx(ax1, ay1)
+        x2, y2 = tx(ax1 + arch_w, ay1 + 1.3)
+        c.setStrokeColor(screen)
+        c.setLineWidth(0.9)
+        c.arc(x1, y1, x2, y2 + 10, 0, 180)
+
+
 def _draw_elevations(c: canvas.Canvas, project: DrawingProject) -> None:
     height = project.storeys * 3.3 + 0.8
     gap = 40.0
     available_frame_width = (PAGE_SIZE[0] - 2 * MARGIN - gap) / 2
     available_frame_height = (CONTENT_TOP - CONTENT_BOTTOM - gap - 28) / 2
-    max_width_m = max(project.lot_width_m, project.lot_depth_m, 1.0)
-    scale = min(SCALE_1_100_PT_PER_M, available_frame_width / max_width_m, available_frame_height / max(height, 1.0))
     left_x = MARGIN + 18
     right_x = left_x + available_frame_width + gap
     lower_y = CONTENT_BOTTOM + 18
@@ -477,20 +650,22 @@ def _draw_elevations(c: canvas.Canvas, project: DrawingProject) -> None:
         ("Tây", right_x, lower_y, project.lot_depth_m),
     )
     for label, x0, y0, width_m in specs:
+        scale = min(SCALE_1_100_PT_PER_M, available_frame_width / max(width_m, 1.0), available_frame_height / max(height, 1.0))
         tx = _mini_transform(x0, y0, scale=scale)
         c.setFillColor(colors.white)
         c.setStrokeColor(colors.HexColor("#d0d7de"))
         c.setLineWidth(0.5)
         c.rect(x0 - 10, y0 - 10, available_frame_width, available_frame_height, stroke=1, fill=0)
-        _poly(c, [(0, 0), (width_m, 0), (width_m, height), (0, height)], tx, close=True, stroke=INK, width=1.35)
+        _draw_style_facade_features(c, project, tx, width_m, height)
         for level in range(1, project.storeys + 1):
             _poly(c, [(0, level * 3.3), (width_m, level * 3.3)], tx, stroke=GRID_STROKE, width=0.6)
             lx, ly = tx(width_m, level * 3.3)
             _text(c, f"L{level}", lx + 5, ly - 3, size=6, color=MUTED_INK)
-        _poly(c, [(width_m * 0.2, 1.0), (width_m * 0.42, 1.0), (width_m * 0.42, 2.3), (width_m * 0.2, 2.3)], tx, close=True, stroke=colors.darkcyan, width=0.9, fill=colors.HexColor("#eef9fb"))
-        _poly(c, [(width_m * 0.62, 4.2), (width_m * 0.84, 4.2), (width_m * 0.84, 5.5), (width_m * 0.62, 5.5)], tx, close=True, stroke=colors.darkcyan, width=0.9, fill=colors.HexColor("#eef9fb"))
         _text(c, f"Mặt đứng {label}", x0, y0 + height * scale + 10, size=8, bold=True)
-    _text(c, f"Style concept: {_fit_text(project.style, 380, size=8)}", MARGIN + 22, CONTENT_BOTTOM - 16, size=8, color=MUTED_INK)
+    metadata = project.style_metadata or {}
+    note = metadata.get("facade_strategy") or metadata.get("facade_intent") or "Mặt tiền concept thể hiện theo style và hình khối sơ bộ."
+    _text(c, f"Style concept: {_fit_text(_customer_style_label(project), 320, size=8)}", MARGIN + 22, CONTENT_BOTTOM - 12, size=8, color=MUTED_INK)
+    _text(c, _fit_text(f"Mặt tiền: {note}", 620, size=7), MARGIN + 22, CONTENT_BOTTOM - 26, size=7, color=MUTED_INK)
 
 
 def _draw_sections(c: canvas.Canvas, project: DrawingProject) -> None:
@@ -507,20 +682,94 @@ def _draw_sections(c: canvas.Canvas, project: DrawingProject) -> None:
         c.setStrokeColor(colors.HexColor("#d0d7de"))
         c.setLineWidth(0.5)
         c.rect(x0 - 10, y0 - 10, available_frame_width + 20, available_frame_height, stroke=1, fill=0)
-        _poly(c, [(0, 0), (width_m, 0), (width_m, height), (0, height)], tx, close=True, stroke=INK, width=1.6)
+        section_fill = colors.HexColor("#fffaf2")
+        slab_fill = colors.HexColor("#d8dde3")
+        core_fill = colors.HexColor("#eef2f6")
+        room_fill = colors.HexColor("#fffdf9")
+        terrace_fill = colors.HexColor("#f2f8f0")
+        _poly(c, [(0, 0), (width_m, 0), (width_m, height), (0, height)], tx, close=True, stroke=INK, width=1.6, fill=section_fill)
+        zone_edges = (0.0, width_m * 0.42, width_m * 0.63, width_m)
+        zone_labels = ("Không gian chính", "Lõi thang/WC", "Không gian sau")
+        if width_m <= 5.2:
+            zone_edges = (0.0, width_m * 0.58, width_m)
+            zone_labels = ("Không gian chính", "Lõi phụ")
+        for level_index in range(project.storeys):
+            y_base = level_index * 3.3
+            y_top = y_base + 3.3
+            for zone_index, (zx1, zx2) in enumerate(zip(zone_edges, zone_edges[1:])):
+                fill = core_fill if "Lõi" in zone_labels[zone_index] else (terrace_fill if level_index == project.storeys - 1 and zone_index == len(zone_labels) - 1 else room_fill)
+                inset = 0.08
+                _poly(
+                    c,
+                    [(zx1 + inset, y_base + 0.16), (zx2 - inset, y_base + 0.16), (zx2 - inset, y_top - 0.18), (zx1 + inset, y_top - 0.18)],
+                    tx,
+                    close=True,
+                    stroke=colors.HexColor("#d7dce2"),
+                    width=0.35,
+                    fill=fill,
+                )
+                label_x, label_y = tx(zx1 + inset + 0.08, y_base + 0.34)
+                _text(c, _fit_text(zone_labels[zone_index], max(34, (zx2 - zx1) * scale - 10), size=5.4), label_x, label_y, size=5.4, color=MUTED_INK)
+            slab_x1, slab_y1 = tx(0, y_base)
+            slab_x2, slab_y2 = tx(width_m, y_base + 0.12)
+            c.setFillColor(slab_fill)
+            c.setStrokeColor(colors.HexColor("#9aa0a6"))
+            c.setLineWidth(0.35)
+            c.rect(slab_x1, slab_y1, slab_x2 - slab_x1, max(2.0, slab_y2 - slab_y1), stroke=1, fill=1)
+        roof_x1, roof_y1 = tx(0, project.storeys * 3.3)
+        roof_x2, roof_y2 = tx(width_m, project.storeys * 3.3 + 0.16)
+        c.setFillColor(slab_fill)
+        c.rect(roof_x1, roof_y1, roof_x2 - roof_x1, max(2.4, roof_y2 - roof_y1), stroke=1, fill=1)
         for level in range(1, project.storeys + 1):
             _poly(c, [(0, level * 3.3), (width_m, level * 3.3)], tx, stroke=GRID_STROKE, width=0.7)
             lx, ly = tx(width_m, level * 3.3)
             _text(c, f"Cao độ L{level}", lx + 6, ly - 3, size=6, color=MUTED_INK)
-        _poly(c, [(0.5, 0.2), (2.2, 3.1), (0.5, 3.1), (2.2, 6.4)], tx, stroke=INK, width=0.8)
+            if level <= project.storeys:
+                base_x, base_y = tx(width_m + 0.55, (level - 1) * 3.3)
+                top_x, top_y = tx(width_m + 0.55, level * 3.3)
+                c.setStrokeColor(colors.red)
+                c.setLineWidth(0.55)
+                c.line(base_x, base_y, top_x, top_y)
+                c.line(base_x - 3, base_y, base_x + 3, base_y)
+                c.line(top_x - 3, top_y, top_x + 3, top_y)
+                _text(c, "Tầng-tầng 3.30 m", top_x + 4, (base_y + top_y) / 2, size=5.8, color=colors.red)
+                _text(c, "Thông thủy ~3.00 m", top_x + 4, (base_y + top_y) / 2 - 9, size=5.8, color=colors.red)
+        stair_x1 = width_m * 0.43
+        stair_x2 = min(width_m - 0.25, stair_x1 + max(1.2, width_m * 0.14))
+        stair_points: list[tuple[float, float]] = []
+        for level_index in range(project.storeys):
+            y_base = level_index * 3.3 + 0.25
+            stair_points.extend([(stair_x1, y_base), (stair_x2, y_base + 1.45), (stair_x1, y_base + 2.9)])
+        _poly(c, stair_points, tx, stroke=INK, width=0.9)
+        for hatch in range(0, max(1, int(width_m))):
+            hx = hatch + 0.15
+            if hx + 0.32 < width_m:
+                _poly(c, [(hx, 0.04), (hx + 0.32, 0.22)], tx, stroke=colors.HexColor("#b8bec5"), width=0.25)
+        _text(c, "Mặt cắt qua lõi thang/giếng trời concept", x0 + 8, y0 + 8, size=6.4, color=MUTED_INK)
+        roof_x, roof_y = tx(width_m * 0.12, height - 0.35)
+        _text(c, "Mái/parapet concept", roof_x, roof_y, size=6.2, color=MUTED_INK)
         _text(c, label, x0, y0 + height * scale + 10, size=8, bold=True)
+        note_x = x0 + min(width_m * scale + 44, available_frame_width * 0.62)
+        note_w = x0 + available_frame_width - note_x - 18
+        if note_w > 120:
+            note_y = y0 + available_frame_height - 36
+            c.setFillColor(NOTE_FILL)
+            c.setStrokeColor(colors.HexColor("#d0d7de"))
+            c.setLineWidth(0.35)
+            c.roundRect(note_x, note_y - 82, note_w, 84, 4, stroke=1, fill=1)
+            notes = [
+                "Sàn/mái: lớp concept, chưa phải cấu tạo thi công.",
+                "Lõi thang/WC đặt giữa nhà để chia nhịp sử dụng.",
+                "Chiều cao: kiểm tra lại theo khảo sát và pháp lý bước sau.",
+            ]
+            _draw_text_lines(c, [_fit_text(item, note_w - 14, size=6.2) for item in notes], note_x + 8, note_y - 15, size=6.2, leading=14, color=MUTED_INK)
 
 
 def _draw_room_area_schedule(c: canvas.Canvas, project: DrawingProject) -> None:
     x = MARGIN + 22
     y = CONTENT_TOP - 16
-    headers = ("Tầng", "Phòng", "Loại", "Diện tích", "Ghi chú")
-    widths = (58, 250, 150, 84, 250)
+    headers = ("Tầng", "Phòng", "Loại", "Kích thước", "Diện tích", "Ghi chú")
+    widths = (52, 210, 118, 116, 78, 218)
     _draw_table_header(c, headers, widths, x, y)
     y -= 22
     for room in project.rooms:
@@ -530,6 +779,7 @@ def _draw_room_area_schedule(c: canvas.Canvas, project: DrawingProject) -> None:
             f"Tầng {room.floor}",
             room.name,
             room.original_type or room.category or "-",
+            _room_size_label(room),
             f"{room.display_area_m2:.1f} m²",
             "Diện tích concept từ polygon sơ bộ",
         )
@@ -537,7 +787,7 @@ def _draw_room_area_schedule(c: canvas.Canvas, project: DrawingProject) -> None:
         y -= 18
     if y >= CONTENT_BOTTOM + 28:
         total_area = sum(room.display_area_m2 for room in project.rooms)
-        _draw_table_row(c, ("", "Tổng diện tích phòng concept", "", f"{total_area:.1f} m²", "Không thay thế đo đạc hiện trạng"), widths, x, y, bold=True)
+        _draw_table_row(c, ("", "Tổng diện tích phòng concept", "", "", f"{total_area:.1f} m²", "Không thay thế đo đạc hiện trạng"), widths, x, y, bold=True)
 
 
 def _draw_door_window_schedule(c: canvas.Canvas, project: DrawingProject) -> None:
@@ -556,7 +806,7 @@ def _draw_door_window_schedule(c: canvas.Canvas, project: DrawingProject) -> Non
             "Cửa sổ" if opening.kind == "window" else "Cửa đi",
             f"{opening.width_m:.2f} m" if opening.width_m else "-",
             f"{opening.height_m:.2f} m" if opening.height_m else "-",
-            opening.operation or "concept",
+            _operation_display_label(opening.operation),
         )
         _draw_table_row(c, values, widths, x, y)
         y -= 18
@@ -570,7 +820,8 @@ def _draw_assumptions_style_notes(c: canvas.Canvas, project: DrawingProject) -> 
     y -= 20
     style_lines = [
         f"Style ID: {metadata.get('style_id') or project.style}",
-        str(metadata.get("facade_strategy") or "Mặt tiền concept lấy từ style/profile và layout sơ bộ."),
+        f"Phong cách khách đọc: {_customer_style_label(project)}",
+        f"Mặt tiền concept: {metadata.get('facade_strategy') or metadata.get('facade_intent') or 'mặt tiền lấy từ style/profile và layout sơ bộ.'}",
     ]
     style_lines.extend(str(note) for note in tuple(metadata.get("drawing_notes") or ())[:4])
     palette = metadata.get("material_palette") or {}
@@ -580,7 +831,14 @@ def _draw_assumptions_style_notes(c: canvas.Canvas, project: DrawingProject) -> 
         if base:
             style_lines.append(f"Vật liệu nền concept: {base}")
         if accent:
-            style_lines.append(f"Điểm nhấn concept: {accent}")
+            style_lines.append(f"Vật liệu/điểm nhấn concept: {accent}")
+    facade_rules = metadata.get("facade_rules") or {}
+    if isinstance(facade_rules, dict) and facade_rules:
+        for key in ("massing", "screening", "greenery", "expression"):
+            value = facade_rules.get(key)
+            if value:
+                style_lines.append(f"Luật mặt tiền - {key}: {value}")
+    style_lines.extend(str(warning) for warning in tuple(metadata.get("planning_warnings") or ()))
     for line in style_lines:
         for wrapped in _wrapped_lines(line, max_chars=108):
             _text(c, wrapped, x, y, size=8)

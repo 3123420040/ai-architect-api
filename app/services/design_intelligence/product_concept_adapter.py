@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any, Literal
 
@@ -26,6 +26,7 @@ from app.services.design_intelligence.provenance import DecisionValue, ai_propos
 from app.services.geometry import LAYER_2_SCHEMA
 from app.services.professional_deliverables.drawing_contract import DrawingProject, Fixture, Opening, Room, WallSegment
 from app.services.professional_deliverables.geometry_adapter import GeometryAdapterError, geometry_to_drawing_project
+from app.services.professional_deliverables.style_knowledge import StyleKnowledgeBase, StyleKnowledgeError
 
 
 AdapterStatus = Literal["ready", "unsupported", "blocked"]
@@ -145,6 +146,7 @@ def adapt_live_design_version_to_concept_source(
             drawing_project=drawing_project,
         )
         validate_concept_model(concept_model)
+        drawing_project = _enrich_drawing_project_style(drawing_project, concept_model)
     except GeometryAdapterError as exc:
         return _blocked("geometry_contract_blocked", "Selected geometry cannot satisfy the Concept 2D package source contract.", "geometry_json", str(exc))
     except (ConceptModelValidationError, ValueError, TypeError, KeyError) as exc:
@@ -441,10 +443,15 @@ def _resolve_style_contract(
         style_id = "live_selected_geometry"
         style_origin = "adapter_default"
 
-    style_name = _first_text((resolved, generation, decision, strategy, brief), ("display_name", "style_display_name", "name", "title_vi", "style_label")) or style_id
+    profile = _style_profile_for(style_id)
+    if profile is not None:
+        style_id = profile.style_id
+
+    style_name = _first_text((resolved, generation, decision, strategy, brief), ("display_name", "style_display_name", "name", "title_vi", "style_label"))
+    style_name = style_name or (profile.display_name if profile is not None else style_id)
     facade_intent = _first_text(style_sources, ("facade_intent", "facade_strategy", "facade_strategy_vi", "massing", "option_summary_vi"))
     if not facade_intent:
-        facade_intent = "Facade intent follows live style metadata and selected geometry."
+        facade_intent = profile.facade_intent if profile is not None else "Facade intent follows live style metadata and selected geometry."
     style_notes = _safe_notes(
         (
             *_text_items(resolved.get("style_notes") or resolved.get("drawing_notes") or resolved.get("notes")),
@@ -453,6 +460,8 @@ def _resolve_style_contract(
             *_text_items(decision.get("strengths")),
         )
     )
+    if profile is not None:
+        style_notes = tuple(dict.fromkeys((*style_notes, *profile.drawing_notes)))
     if not style_notes:
         style_notes = (f"Style source: {style_name}.",)
     assumptions = _safe_notes(
@@ -477,7 +486,13 @@ def _resolve_style_contract(
         "facade_intent": facade_intent,
         "facade_strategy": facade_intent,
         "assumptions": assumptions,
-        "material_palette": resolved.get("material_palette") if isinstance(resolved.get("material_palette"), dict) else {},
+        "material_palette": resolved.get("material_palette")
+        if isinstance(resolved.get("material_palette"), dict)
+        else profile.material_palette
+        if profile is not None
+        else {},
+        "drawing_rules": profile.drawing_rules if profile is not None else {},
+        "facade_rules": profile.facade_rules if profile is not None else {},
     }
     return {
         "style_decision": style_decision,
@@ -496,6 +511,58 @@ def _adapter_assumptions(style_contract: dict[str, Any], default_assumptions: li
     ]
     safe_notes = _safe_notes(notes)
     return tuple(rule_default(note, note, confidence=0.76, needs_confirmation=True) for note in safe_notes)
+
+
+def _style_profile_for(style_id: str) -> Any | None:
+    try:
+        return StyleKnowledgeBase.load_default().get(style_id)
+    except StyleKnowledgeError:
+        return None
+
+
+def _enrich_drawing_project_style(drawing_project: DrawingProject, concept_model: ArchitecturalConceptModel) -> DrawingProject:
+    style_metadata = concept_model.metadata.get("style_metadata") if isinstance(concept_model.metadata, dict) else {}
+    style_metadata = dict(style_metadata) if isinstance(style_metadata, dict) else {}
+    style_id = str(style_metadata.get("style_id") or (concept_model.style.value if concept_model.style else drawing_project.style))
+    profile = _style_profile_for(style_id)
+    if profile is not None:
+        customer_label = {
+            "minimal_warm": "Modern Minimalist / Tối giản ấm",
+            "modern_tropical": "Modern Tropical / Hiện đại nhiệt đới",
+            "indochine_soft": "Indochine Soft / Indochine mềm",
+        }.get(profile.style_id, f"{profile.display_name}")
+        style_metadata.setdefault("style_id", profile.style_id)
+        style_metadata.setdefault("style_display_name", profile.display_name)
+        style_metadata.setdefault("customer_style_label", customer_label)
+        style_metadata.setdefault("facade_intent", profile.facade_intent)
+        style_metadata.setdefault("facade_strategy", profile.facade_intent)
+        style_metadata.setdefault("drawing_notes", profile.drawing_notes)
+        style_metadata.setdefault("material_palette", profile.material_palette)
+        style_metadata.setdefault("drawing_rules", profile.drawing_rules)
+        style_metadata.setdefault("facade_rules", profile.facade_rules)
+        warnings = _planning_warnings(drawing_project)
+        if warnings:
+            style_metadata["planning_warnings"] = warnings
+        return replace(drawing_project, style=customer_label, style_metadata=style_metadata)
+    fallback_label = style_id.replace("_", " ").title()
+    style_metadata.setdefault("customer_style_label", fallback_label)
+    warnings = _planning_warnings(drawing_project)
+    if warnings:
+        style_metadata["planning_warnings"] = warnings
+    return replace(drawing_project, style=fallback_label, style_metadata=style_metadata)
+
+
+def _planning_warnings(drawing_project: DrawingProject) -> tuple[str, ...]:
+    warnings: list[str] = []
+    large_rooms = [room for room in drawing_project.rooms if room.display_area_m2 >= 38.0]
+    small_rooms = [room for room in drawing_project.rooms if room.display_area_m2 < 2.0]
+    if large_rooms:
+        examples = ", ".join(f"{room.name} {room.display_area_m2:.1f} m²" for room in large_rooms[:4])
+        warnings.append(f"Một số phòng/khoảng sân khá lớn trong geometry đã chọn và cần khách/kiến trúc sư xác nhận ở vòng review: {examples}.")
+    if small_rooms:
+        examples = ", ".join(f"{room.name} {room.display_area_m2:.1f} m²" for room in small_rooms[:4])
+        warnings.append(f"Một số khu phụ rất nhỏ cần xác nhận khả năng sử dụng ở vòng review: {examples}.")
+    return tuple(warnings)
 
 
 def _provenance(

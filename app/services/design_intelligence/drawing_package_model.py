@@ -60,6 +60,8 @@ def compile_drawing_package(concept_model: ArchitecturalConceptModel) -> Drawing
             "level_id": room.level_id,
             "label_vi": room.label_vi,
             "room_type": room.room_type,
+            "width_m": _room_extent(room.polygon.value)[0],
+            "depth_m": _room_extent(room.polygon.value)[1],
             "area_m2": room.area_m2.value,
         }
         for room in concept_model.rooms
@@ -69,9 +71,11 @@ def compile_drawing_package(concept_model: ArchitecturalConceptModel) -> Drawing
             "opening_id": opening.id,
             "level_id": opening.level_id,
             "type": opening.opening_type,
+            "type_vi": "Cửa sổ" if opening.opening_type == "window" else "Cửa đi",
             "width_m": opening.width_m.value,
             "height_m": opening.height_m.value,
             "wall_id": opening.wall_id,
+            "operation": _operation_note(opening.operation.value if opening.operation else None),
         }
         for opening in concept_model.openings
     )
@@ -182,3 +186,43 @@ def _live_style_notes(concept_model: ArchitecturalConceptModel) -> tuple[str, ..
     if isinstance(notes, (list, tuple)):
         return tuple(str(note) for note in notes if str(note).strip())
     return ()
+
+
+def _operation_note(value: Any) -> str:
+    if value is None:
+        return "concept"
+    if isinstance(value, dict):
+        operation_type = str(value.get("type") or value.get("operation") or value.get("mode") or "").strip()
+        hinge_side = str(value.get("hinge_side") or value.get("swing") or "").strip()
+        parts: list[str] = []
+        if operation_type == "sliding" or value.get("sliding"):
+            parts.append("trượt")
+        elif operation_type in {"swing", "hinged"}:
+            parts.append("mở quay")
+        elif operation_type == "fixed":
+            parts.append("cố định")
+        elif operation_type:
+            parts.append(operation_type.replace("_", " "))
+        if hinge_side in {"left", "right"}:
+            parts.append("bản lề trái" if hinge_side == "left" else "bản lề phải")
+        return ", ".join(parts) or "concept"
+    text = str(value).strip()
+    if not text:
+        return "concept"
+    return {
+        "sliding": "trượt",
+        "swing": "mở quay",
+        "hinged": "mở quay",
+        "fixed": "cố định",
+        "fixed_or_sliding": "cố định hoặc trượt",
+        "sliding_or_swing": "trượt hoặc mở quay",
+        "shaded_louver": "lam che nắng",
+        "vent_louver": "ô thoáng thông gió",
+        "unspecified": "concept",
+    }.get(text, text.replace("_", " "))
+
+
+def _room_extent(points: tuple[tuple[float, float], ...]) -> tuple[float, float]:
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    return round(max(xs) - min(xs), 2), round(max(ys) - min(ys), 2)

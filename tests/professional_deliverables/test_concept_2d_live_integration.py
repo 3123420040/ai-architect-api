@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import fitz
 import ezdxf
+import pytest
 from sqlalchemy import select
 
 from app.db import SessionLocal
@@ -52,6 +53,33 @@ def _live_5x20_four_floor_brief() -> dict:
     brief["style"] = "minimal_warm"
     brief["summary"] = "Local live regression case 56e4: 5x20m, 4 floors, rooms/walls/openings."
     return brief
+
+
+@pytest.mark.parametrize(
+    ("width", "depth", "floors"),
+    [
+        (4, 16, 3),
+        (5, 20, 4),
+        (5, 30, 4),
+        (6, 22, 4),
+        (7, 25, 3),
+        (8, 20, 2),
+        (10, 12, 2),
+    ],
+)
+def test_generated_live_geometry_avoids_unreviewable_room_area_outliers(width, depth, floors):
+    brief = complete_brief_payload()
+    brief["lot"] = {"width_m": width, "depth_m": depth, "orientation": "south"}
+    brief["floors"] = floors
+    brief["rooms"] = {"bedrooms": 4, "bathrooms": 4}
+    brief["style"] = "modern_minimalist"
+
+    geometry = build_geometry_v2(brief)
+    room_areas = [(room["name"], room["area_m2"]) for room in geometry["rooms"]]
+
+    assert room_areas
+    assert all(area < 38 for _name, area in room_areas)
+    assert all(area >= 2 for _name, area in room_areas)
 
 
 def _make_live_case_job(client, session_payload) -> tuple[str, str]:
@@ -175,6 +203,12 @@ def test_live_product_geometry_generates_full_concept_package_evidence(client, s
     assert "Bảng phòng và diện tích" in pdf_text
     assert "Bảng cửa đi và cửa sổ" in pdf_text
     assert "Giả định và ghi chú style" in pdf_text
+    assert "Modern Minimalist / Tối giản ấm" in pdf_text
+    assert "Vật liệu nền concept" in pdf_text
+    assert "Mặt tiền concept" in pdf_text
+    assert "Tầng-tầng 3.30 m" in pdf_text
+    assert "{'type':" not in pdf_text
+    assert '"type":' not in pdf_text
     assert "5.00 m" in pdf_text
     assert "20.00 m" in pdf_text
     assert STALE_GOLDEN_DIMENSION_LABEL not in pdf_text
@@ -184,6 +218,10 @@ def test_live_product_geometry_generates_full_concept_package_evidence(client, s
     concept_package = quality_report["concept_package"]
     assert concept_package["enabled"] is True
     assert concept_package["readiness"] == "ready"
+    assert concept_package["technical_ready"] is True
+    assert concept_package["concept_review_ready"] is True
+    assert concept_package["market_presentation_ready"] is False
+    assert concept_package["construction_ready"] is False
     assert concept_package["fallback_reason"] is None
     assert concept_package["qa_bounds"]["lot_width_m"] == 5
     assert concept_package["qa_bounds"]["lot_depth_m"] == 20
@@ -195,6 +233,9 @@ def test_live_product_geometry_generates_full_concept_package_evidence(client, s
     readiness = {artifact["artifact_role"]: artifact for artifact in quality_report["artifacts"]}
     assert readiness["pdf"]["state"] == "ready"
     assert readiness["pdf"]["customer_ready"] is True
+    assert readiness["pdf"]["technical_ready"] is True
+    assert readiness["pdf"]["concept_review_ready"] is True
+    assert readiness["pdf"]["construction_ready"] is False
     assert readiness["dxf"]["state"] == "ready"
     assert readiness["dxf"]["customer_ready"] is True
     assert readiness["dwg"]["state"] in {"ready", "skipped"}

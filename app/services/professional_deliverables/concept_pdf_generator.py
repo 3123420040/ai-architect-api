@@ -32,6 +32,7 @@ def render_concept_2d_package(
         output_root,
         require_dwg=require_dwg,
         sheets=concept_sheet_specs(package),
+        concept_package_metadata=_standalone_concept_package_metadata(package),
     )
     return Concept2DRenderResult(drawing_package=package, drawing_project=drawing_project, bundle=bundle)
 
@@ -84,7 +85,7 @@ def concept_model_to_drawing_project(concept_model: ArchitecturalConceptModel, *
         lot_width_m=float(concept_model.site.width_m.value),
         lot_depth_m=float(concept_model.site.depth_m.value),
         storeys=len(concept_model.levels),
-        style=str(concept_model.style.value) if concept_model.style else "concept",
+        style=_style_display_label(concept_model),
         issue_date=date.today(),
         rooms=rooms,
         walls=walls,
@@ -127,12 +128,41 @@ def concept_sheet_specs(package: DrawingPackageModel) -> tuple[SheetSpec, ...]:
     return tuple(sheets)
 
 
+def _standalone_concept_package_metadata(package: DrawingPackageModel) -> dict:
+    sheets = [
+        {
+            "sheet_number": sheet.number,
+            "sheet_title": sheet.title,
+            "sheet_kind": sheet.kind,
+            "readiness": "ready",
+            "state": "ready",
+            "filename": spec.filename_stem + ".dxf",
+        }
+        for sheet, spec in zip(package.sheets, concept_sheet_specs(package), strict=True)
+    ]
+    return {
+        "enabled": True,
+        "readiness": "ready",
+        "readiness_label": "Concept 2D technical-ready; market presentation depends on visual QA gates.",
+        "technical_ready": True,
+        "concept_review_ready": True,
+        "market_presentation_ready": False,
+        "construction_ready": False,
+        "fallback_reason": None,
+        "source": "standalone_concept_renderer",
+        "sheet_count": len(sheets),
+        "sheets": sheets,
+        "qa_bounds": package.qa_bounds,
+    }
+
+
 def _style_metadata(concept_model: ArchitecturalConceptModel) -> dict:
     style_id = str(concept_model.style.value) if concept_model.style else None
     live_style = _live_style_metadata(concept_model)
     metadata = {
         "style_id": style_id,
         "style_display_name": live_style.get("style_name") or live_style.get("display_name"),
+        "customer_style_label": _style_display_label(concept_model),
         "facade_strategy": live_style.get("facade_strategy") or live_style.get("facade_intent") or (concept_model.facade.strategy.value if concept_model.facade else None),
         "facade_intent": live_style.get("facade_intent"),
         "assumptions": tuple(assumption.customer_visible_explanation for assumption in concept_model.assumptions),
@@ -173,7 +203,7 @@ def _to_drawing_opening(opening, wall_lookup: dict[str, ConceptWall]) -> Opening
         width_m=width,
         height_m=float(opening.height_m.value),
         sill_height_m=float(opening.sill_height_m.value) if opening.sill_height_m else None,
-        operation=str(opening.operation.value),
+        operation=_operation_display_label(opening.operation.value),
     )
 
 
@@ -215,3 +245,55 @@ def _as_tuple(value) -> tuple:
     if isinstance(value, str) and value.strip():
         return (value.strip(),)
     return ()
+
+
+def _style_display_label(concept_model: ArchitecturalConceptModel) -> str:
+    style_id = str(concept_model.style.value) if concept_model.style else ""
+    live_style = _live_style_metadata(concept_model)
+    explicit = live_style.get("customer_style_label") or live_style.get("style_display_name") or live_style.get("style_name")
+    try:
+        profile = StyleKnowledgeBase.load_default().get(style_id)
+    except StyleKnowledgeError:
+        if explicit:
+            return str(explicit)
+        return style_id.replace("_", " ").title() if style_id else "Concept style"
+    english = {
+        "minimal_warm": "Modern Minimalist",
+        "modern_tropical": "Modern Tropical",
+        "indochine_soft": "Indochine Soft",
+    }.get(profile.style_id, profile.display_name)
+    return f"{english} / {profile.display_name}"
+
+
+def _operation_display_label(value) -> str:
+    if value is None:
+        return "concept"
+    if isinstance(value, dict):
+        operation_type = str(value.get("type") or value.get("operation") or value.get("mode") or "").strip()
+        hinge_side = str(value.get("hinge_side") or value.get("swing") or "").strip()
+        parts: list[str] = []
+        if operation_type == "sliding" or value.get("sliding"):
+            parts.append("trượt")
+        elif operation_type in {"swing", "hinged"}:
+            parts.append("mở quay")
+        elif operation_type == "fixed":
+            parts.append("cố định")
+        elif operation_type:
+            parts.append(operation_type.replace("_", " "))
+        if hinge_side in {"left", "right"}:
+            parts.append("bản lề trái" if hinge_side == "left" else "bản lề phải")
+        return ", ".join(parts) or "concept"
+    text = str(value).strip()
+    if not text:
+        return "concept"
+    return {
+        "sliding": "trượt",
+        "swing": "mở quay",
+        "hinged": "mở quay",
+        "fixed": "cố định",
+        "fixed_or_sliding": "cố định hoặc trượt",
+        "sliding_or_swing": "trượt hoặc mở quay",
+        "shaded_louver": "lam che nắng",
+        "vent_louver": "ô thoáng thông gió",
+        "unspecified": "concept",
+    }.get(text, text.replace("_", " "))

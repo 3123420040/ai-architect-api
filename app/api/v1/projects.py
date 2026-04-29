@@ -115,6 +115,8 @@ def _serialize_project(project: Project, versions: list[DesignVersion]) -> dict:
                 "decision_metadata_degraded_reasons": ((version.generation_metadata or {}).get("decision_metadata") or {}).get("degraded_reasons") or [],
                 "generation_source": (version.generation_metadata or {}).get("generation_source"),
                 "parent_version_id": version.parent_version_id,
+                "current_presentation_3d_bundle_id": version.current_presentation_3d_bundle_id,
+                "current_professional_deliverable_bundle_id": version.current_professional_deliverable_bundle_id,
                 "export_urls": version.export_urls,
                 "generation_metadata": version.generation_metadata,
                 "created_at": version.created_at,

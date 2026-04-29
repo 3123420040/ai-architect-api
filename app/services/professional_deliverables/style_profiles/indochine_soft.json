@@ -2,7 +2,7 @@
   "style_id": "indochine_soft",
   "display_name": "Indochine mềm",
   "version": "2026.04",
-  "aliases": ["indochine soft", "soft indochine", "indochine nhẹ", "đông dương nhẹ", "dong duong nhe", "Á Đông nhẹ", "a dong nhe"],
+  "aliases": ["indochine soft", "soft indochine", "indochine", "indochine nhẹ", "đông dương nhẹ", "dong duong nhe", "Á Đông nhẹ", "a dong nhe"],
   "customer_language_signals": ["indochine", "đông dương", "ấm sang", "cổ điển nhẹ", "mây tre", "gạch bông", "vòm nhẹ", "truyền thống nhưng nhẹ", "gỗ tối", "màu kem", "hoài cổ nhẹ", "chất á đông"],
   "visual_signals": ["arched opening", "rattan", "pattern tile", "dark wood accent", "cream wall", "decorative screen", "colonial shutters", "brass accent", "timber panel", "encaustic tile"],
   "spatial_rules": {

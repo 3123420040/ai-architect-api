@@ -476,6 +476,11 @@ def test_phase6_presentation_bundle_flow(client, session_payload, monkeypatch):
     assert create_job.status_code == 202, create_job.text
     bundle_id = create_job.json()["bundle_id"]
 
+    project_response = client.get(f"/api/v1/projects/{project_id}", headers=auth_headers(token))
+    assert project_response.status_code == 200, project_response.text
+    serialized_version = next(item for item in project_response.json()["versions"] if item["id"] == version_id)
+    assert serialized_version["current_presentation_3d_bundle_id"] == bundle_id
+
     bundle_response = client.get(
         f"/api/v1/versions/{version_id}/presentation-3d",
         headers=auth_headers(token),

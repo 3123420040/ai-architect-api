@@ -17,21 +17,28 @@ from app.services.professional_deliverables.artifact_quality_report import (
 from app.services.professional_deliverables.drawing_quality_gates import (
     validate_dxf_dimensions_match,
     validate_dxf_no_stale_golden_labels,
+    validate_dxf_no_raw_internal_strings,
     validate_dxf_openable,
     validate_dxf_project_extents_match,
     validate_dxf_required_layers,
+    validate_dxf_room_dimensions,
     validate_dxf_room_labels_openings,
     validate_dxf_units_meters,
     validate_pdf_dimension_chains,
     validate_pdf_dynamic_dimensions,
     validate_pdf_elevation_layout,
+    validate_pdf_elevation_visual_density,
     validate_pdf_floor_count,
+    validate_pdf_no_raw_internal_strings,
     validate_pdf_no_stale_golden_labels,
     validate_pdf_no_title_overlap,
     validate_pdf_page_count,
     validate_pdf_page_render_nonblank,
+    validate_pdf_room_dimension_labels,
     validate_pdf_room_labels_areas,
+    validate_pdf_section_height_labels,
     validate_pdf_site_boundary_match,
+    validate_pdf_style_material_notes,
 )
 from app.services.professional_deliverables.drawing_contract import DrawingProject
 from app.services.professional_deliverables.dwg_converter import ODAConverterError, convert_dxf_directory_to_dwg
@@ -166,6 +173,18 @@ def generate_project_2d_bundle(
         validate_dxf_room_labels_openings(dxf_paths, project),
         validate_dxf_no_stale_golden_labels(dxf_paths, project),
     ]
+    if concept_package_metadata is not None:
+        gate_results.extend(
+            [
+                validate_pdf_room_dimension_labels(pdf_path, project),
+                validate_pdf_no_raw_internal_strings(pdf_path),
+                validate_pdf_section_height_labels(pdf_path),
+                validate_pdf_style_material_notes(pdf_path),
+                validate_pdf_elevation_visual_density(pdf_path),
+                validate_dxf_room_dimensions(dxf_paths, project),
+                validate_dxf_no_raw_internal_strings(dxf_paths),
+            ]
+        )
     if audit_dir.exists():
         shutil.rmtree(audit_dir)
     readiness = build_2d_artifact_readiness(

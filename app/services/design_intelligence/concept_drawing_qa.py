@@ -95,6 +95,11 @@ def validate_physical_sheet_presence(package: DrawingPackageModel, result: Sprin
     ]
     missing_dxf_title_blocks = _missing_dxf_title_blocks(package, result)
     empty_dxf = _empty_dxf_sheets(result)
+    raw_hits = _raw_render_hits(pdf_text, result.dxf_paths)
+    missing_room_dimensions = _missing_room_dimension_labels(package, pdf_text)
+    style_note_missing = _style_note_missing(pdf_text)
+    section_height_missing = "Mặt cắt concept" in pdf_text and ("3.30 m" not in pdf_text.split("Mặt cắt concept", 1)[-1] or "3.00 m" not in pdf_text.split("Mặt cắt concept", 1)[-1])
+    sparse_elevations = _sparse_elevation_pages(result.pdf_path)
     return (
         _gate("CONCEPT_PDF_PHYSICAL_SHEETS", page_count == len(package.sheets), f"PDF pages={page_count}, package sheets={len(package.sheets)}"),
         _gate("CONCEPT_DXF_PHYSICAL_SHEETS", not missing_dxf, "missing DXF sheets: " + ", ".join(missing_dxf) if missing_dxf else f"{len(actual_dxf)} DXF sheets present"),
@@ -103,6 +108,11 @@ def validate_physical_sheet_presence(package: DrawingPackageModel, result: Sprin
         _gate("CONCEPT_PDF_RENDER_ARTIFACTS", not blank_pages, f"blank or near-blank PDF pages: {blank_pages}" if blank_pages else "all PDF pages render with visible content"),
         _gate("CONCEPT_DXF_TITLE_BLOCKS", not missing_dxf_title_blocks, "missing DXF title block tokens: " + ", ".join(missing_dxf_title_blocks[:6]) if missing_dxf_title_blocks else "every DXF sheet carries its sheet number and title"),
         _gate("CONCEPT_DXF_RENDER_ARTIFACTS", not empty_dxf, "empty/unopenable DXF sheets: " + ", ".join(empty_dxf[:6]) if empty_dxf else "all DXF sheets contain modelspace entities"),
+        _gate("CONCEPT_RENDER_NO_RAW_INTERNAL_STRINGS", not raw_hits, "raw/internal strings found: " + ", ".join(raw_hits[:8]) if raw_hits else "no raw dict/json/internal strings found"),
+        _gate("CONCEPT_RENDER_ROOM_DIMENSIONS", not missing_room_dimensions, "missing room dimension labels: " + ", ".join(missing_room_dimensions[:8]) if missing_room_dimensions else "room-level dimension labels are rendered"),
+        _gate("CONCEPT_RENDER_STYLE_MATERIAL_NOTES", not style_note_missing, "style/material notes are missing facade/material/customer label text" if style_note_missing else "style label, facade, and material notes are rendered"),
+        _gate("CONCEPT_RENDER_SECTION_HEIGHTS", not section_height_missing, "section missing 3.30 m floor-to-floor and 3.00 m clear-height labels" if section_height_missing else "section height labels rendered"),
+        _gate("CONCEPT_RENDER_ELEVATION_DENSITY", not sparse_elevations, "sparse elevation pages: " + ", ".join(sparse_elevations) if sparse_elevations else "elevation pages meet minimum visual density"),
         _gate("CONCEPT_RENDER_SCOPE_TEXT", not _unsafe_render_hits(pdf_text, result.dxf_paths), _unsafe_render_detail(pdf_text, result.dxf_paths)),
     )
 
@@ -140,8 +150,8 @@ def _schedule_has_rows(package: DrawingPackageModel, schedule_type: str, minimum
 
 def _schedule_columns_present(package: DrawingPackageModel) -> bool:
     expected_by_type = {
-        "room_area": {"room_id", "level_id", "label_vi", "room_type", "area_m2"},
-        "door_window": {"opening_id", "level_id", "type", "width_m", "height_m", "wall_id"},
+        "room_area": {"room_id", "level_id", "label_vi", "room_type", "width_m", "depth_m", "area_m2"},
+        "door_window": {"opening_id", "level_id", "type", "type_vi", "width_m", "height_m", "wall_id", "operation"},
         "assumptions": {"note"},
     }
     found = {schedule.schedule_type: schedule for sheet in package.sheets for schedule in sheet.schedules}
@@ -265,6 +275,73 @@ def _unsafe_render_detail(pdf_text: str, dxf_paths: tuple[Path, ...]) -> str:
     if hits:
         return "unsafe rendered scope claims found: " + ", ".join(hits)
     return "rendered text stays concept-only"
+
+
+def _raw_render_hits(pdf_text: str, dxf_paths: tuple[Path, ...]) -> list[str]:
+    text = pdf_text
+    for path in dxf_paths:
+        if not path.exists():
+            continue
+        try:
+            text += "\n" + _dxf_text(ezdxf.readfile(path))
+        except Exception:
+            continue
+    hits: list[str] = []
+    for pattern in ("{'type':", '"type":', "<DecisionValue", "source='", "assumption="):
+        if pattern in text:
+            hits.append(pattern)
+    return hits
+
+
+def _missing_room_dimension_labels(package: DrawingPackageModel, pdf_text: str) -> list[str]:
+    labels: list[str] = []
+    for sheet in package.sheets:
+        if sheet.kind != "room_area_schedule":
+            continue
+        for schedule in sheet.schedules:
+            if schedule.schedule_type != "room_area":
+                continue
+            for row in schedule.rows:
+                width = row.get("width_m")
+                depth = row.get("depth_m")
+                if width is None or depth is None:
+                    continue
+                label = f"{float(width):.2f} m x {float(depth):.2f} m"
+                if label not in pdf_text:
+                    labels.append(label)
+    return labels
+
+
+def _style_note_missing(pdf_text: str) -> bool:
+    text = pdf_text.lower()
+    has_style = any(token.lower() in text for token in ("Modern Minimalist", "Modern Tropical", "Indochine Soft"))
+    return not has_style or "mặt tiền" not in text or "vật liệu" not in text
+
+
+def _sparse_elevation_pages(pdf_path: Path, *, minimum_ratio: float = 0.045) -> list[str]:
+    sparse: list[str] = []
+    with fitz.open(pdf_path) as doc:
+        for index, page in enumerate(doc, start=1):
+            if "Mặt đứng concept" not in page.get_text("text"):
+                continue
+            ratio = _nonwhite_ratio(page)
+            if ratio < minimum_ratio:
+                sparse.append(f"page {index}: {ratio:.3f}")
+    return sparse
+
+
+def _nonwhite_ratio(page: fitz.Page) -> float:
+    pix = page.get_pixmap(matrix=fitz.Matrix(0.18, 0.18), alpha=False)
+    channels = pix.n
+    samples = pix.samples
+    non_white = 0
+    total = 0
+    for offset in range(0, len(samples), channels):
+        pixel = samples[offset : offset + min(channels, 3)]
+        total += 1
+        if any(value < 245 for value in pixel):
+            non_white += 1
+    return non_white / total if total else 0.0
 
 
 def _sheet_filename(number: str, kind: str) -> str:

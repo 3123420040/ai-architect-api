@@ -21,6 +21,10 @@ class ArtifactReadiness:
     gates: tuple[str, ...]
     user_message: str
     technical_detail: str = ""
+    technical_ready: bool = False
+    concept_review_ready: bool = False
+    market_presentation_ready: bool = False
+    construction_ready: bool = False
 
     def as_dict(self, root: Path) -> dict[str, Any]:
         relative_path = self.path.relative_to(root).as_posix() if self.path and self.path.exists() else None
@@ -33,6 +37,10 @@ class ArtifactReadiness:
             "semantic_valid": self.semantic_valid,
             "visual_qa": self.visual_qa,
             "customer_ready": self.customer_ready,
+            "technical_ready": self.technical_ready,
+            "concept_review_ready": self.concept_review_ready,
+            "market_presentation_ready": self.market_presentation_ready,
+            "construction_ready": self.construction_ready,
             "byte_size": self.path.stat().st_size if self.path and self.path.exists() else 0,
             "sha256": sha256_file(self.path) if self.path and self.path.exists() else None,
             "gates": list(self.gates),
@@ -61,9 +69,14 @@ def build_2d_artifact_readiness(
         "PDF_FLOOR_COUNT",
         "PDF_ROOM_LABELS_AREAS",
         "PDF_DIMENSION_CHAINS",
+        "PDF_ROOM_DIMENSION_LABELS",
+        "PDF_NO_RAW_INTERNAL_STRINGS",
+        "PDF_SECTION_HEIGHT_LABELS",
+        "PDF_STYLE_MATERIAL_NOTES",
         "PDF_NO_TITLE_OVERLAP",
         "PDF_PAGE_RENDER_NONBLANK",
         "PDF_ELEVATION_LAYOUT",
+        "PDF_ELEVATION_VISUAL_DENSITY",
         "PDF_NO_STALE_GOLDEN_LABELS",
     )
     dxf_gate_names = (
@@ -72,41 +85,85 @@ def build_2d_artifact_readiness(
         "DXF_REQUIRED_LAYERS",
         "DXF_PROJECT_EXTENTS_MATCH",
         "DXF_DIMENSIONS_MATCH",
+        "DXF_ROOM_DIMENSIONS",
         "DXF_ROOM_LABELS_OPENINGS",
+        "DXF_NO_RAW_INTERNAL_STRINGS",
         "DXF_NO_STALE_GOLDEN_LABELS",
     )
 
-    pdf_ready = pdf_path.exists() and all(statuses.get(name) == "pass" for name in pdf_gate_names if name in statuses)
-    dxf_ready = bool(dxf_paths) and all(path.exists() for path in dxf_paths) and all(
-        statuses.get(name) == "pass" for name in dxf_gate_names if name in statuses
+    pdf_technical_gates = (
+        "PDF_PAGE_COUNT",
+        "PDF_DYNAMIC_DIMENSIONS",
+        "PDF_SITE_BOUNDARY_MATCH",
+        "PDF_FLOOR_COUNT",
+        "PDF_ROOM_LABELS_AREAS",
+        "PDF_DIMENSION_CHAINS",
+        "PDF_NO_STALE_GOLDEN_LABELS",
     )
+    pdf_market_gates = (
+        "PDF_ROOM_DIMENSION_LABELS",
+        "PDF_NO_RAW_INTERNAL_STRINGS",
+        "PDF_SECTION_HEIGHT_LABELS",
+        "PDF_STYLE_MATERIAL_NOTES",
+        "PDF_NO_TITLE_OVERLAP",
+        "PDF_PAGE_RENDER_NONBLANK",
+        "PDF_ELEVATION_LAYOUT",
+        "PDF_ELEVATION_VISUAL_DENSITY",
+    )
+    dxf_technical_gates = (
+        "DXF_OPENABLE",
+        "DXF_UNITS_METERS",
+        "DXF_REQUIRED_LAYERS",
+        "DXF_PROJECT_EXTENTS_MATCH",
+        "DXF_DIMENSIONS_MATCH",
+        "DXF_ROOM_LABELS_OPENINGS",
+        "DXF_NO_STALE_GOLDEN_LABELS",
+    )
+    dxf_market_gates = ("DXF_ROOM_DIMENSIONS", "DXF_NO_RAW_INTERNAL_STRINGS")
+
+    pdf_technical_ready = pdf_path.exists() and all(statuses.get(name) == "pass" for name in pdf_technical_gates if name in statuses)
+    pdf_market_ready = pdf_technical_ready and all(statuses.get(name) == "pass" for name in pdf_market_gates if name in statuses)
+    dxf_technical_ready = bool(dxf_paths) and all(path.exists() for path in dxf_paths) and all(
+        statuses.get(name) == "pass" for name in dxf_technical_gates if name in statuses
+    )
+    dxf_market_ready = dxf_technical_ready and all(statuses.get(name) == "pass" for name in dxf_market_gates if name in statuses)
     dwg_ready = bool(dwg_paths) and all(path.exists() for path in dwg_paths)
     dwg_skipped = not dwg_paths and bool(dwg_skip_reason)
+    pdf_state = "ready" if pdf_market_ready else "partial" if pdf_technical_ready else "failed"
+    dxf_state = "ready" if dxf_market_ready else "partial" if dxf_technical_ready else "failed"
 
     return (
         ArtifactReadiness(
             artifact_role="pdf",
             path=pdf_path,
-            state="ready" if pdf_ready else "failed",
+            state=pdf_state,
             exists=pdf_path.exists(),
             format_valid=statuses.get("PDF_PAGE_COUNT") == "pass",
-            semantic_valid=all(statuses.get(name) == "pass" for name in ("PDF_DYNAMIC_DIMENSIONS", "PDF_SITE_BOUNDARY_MATCH", "PDF_ROOM_LABELS_AREAS", "PDF_DIMENSION_CHAINS", "PDF_NO_STALE_GOLDEN_LABELS") if name in statuses),
-            visual_qa=all(statuses.get(name) == "pass" for name in ("PDF_NO_TITLE_OVERLAP", "PDF_PAGE_RENDER_NONBLANK", "PDF_ELEVATION_LAYOUT") if name in statuses),
-            customer_ready=pdf_ready,
+            semantic_valid=all(statuses.get(name) == "pass" for name in ("PDF_DYNAMIC_DIMENSIONS", "PDF_SITE_BOUNDARY_MATCH", "PDF_ROOM_LABELS_AREAS", "PDF_DIMENSION_CHAINS", "PDF_ROOM_DIMENSION_LABELS", "PDF_NO_RAW_INTERNAL_STRINGS", "PDF_NO_STALE_GOLDEN_LABELS") if name in statuses),
+            visual_qa=all(statuses.get(name) == "pass" for name in ("PDF_NO_TITLE_OVERLAP", "PDF_PAGE_RENDER_NONBLANK", "PDF_ELEVATION_LAYOUT", "PDF_ELEVATION_VISUAL_DENSITY") if name in statuses),
+            customer_ready=pdf_market_ready,
+            technical_ready=pdf_technical_ready,
+            concept_review_ready=pdf_technical_ready,
+            market_presentation_ready=pdf_market_ready,
+            construction_ready=False,
             gates=pdf_gate_names,
-            user_message="PDF drawing bundle is ready for concept review." if pdf_ready else "PDF drawing bundle failed one or more quality gates.",
+            user_message="PDF drawing bundle is ready for concept review." if pdf_market_ready else "PDF drawing bundle is technical-ready but still needs concept presentation review." if pdf_technical_ready else "PDF drawing bundle failed one or more quality gates.",
         ),
         ArtifactReadiness(
             artifact_role="dxf",
             path=dxf_paths[0] if dxf_paths else None,
-            state="ready" if dxf_ready else "failed",
+            state=dxf_state,
             exists=bool(dxf_paths) and all(path.exists() for path in dxf_paths),
             format_valid=statuses.get("DXF_OPENABLE") == "pass" and statuses.get("DXF_UNITS_METERS") == "pass",
-            semantic_valid=all(statuses.get(name) == "pass" for name in ("DXF_PROJECT_EXTENTS_MATCH", "DXF_DIMENSIONS_MATCH", "DXF_ROOM_LABELS_OPENINGS", "DXF_NO_STALE_GOLDEN_LABELS") if name in statuses),
-            visual_qa=dxf_ready,
-            customer_ready=dxf_ready,
+            semantic_valid=all(statuses.get(name) == "pass" for name in ("DXF_PROJECT_EXTENTS_MATCH", "DXF_DIMENSIONS_MATCH", "DXF_ROOM_DIMENSIONS", "DXF_ROOM_LABELS_OPENINGS", "DXF_NO_RAW_INTERNAL_STRINGS", "DXF_NO_STALE_GOLDEN_LABELS") if name in statuses),
+            visual_qa=dxf_market_ready,
+            customer_ready=dxf_market_ready,
+            technical_ready=dxf_technical_ready,
+            concept_review_ready=dxf_technical_ready,
+            market_presentation_ready=dxf_market_ready,
+            construction_ready=False,
             gates=dxf_gate_names,
-            user_message="DXF sheets are ready for CAD review." if dxf_ready else "DXF sheets failed one or more quality gates.",
+            user_message="DXF sheets are ready for CAD concept review." if dxf_market_ready else "DXF sheets are technical-ready but still need concept presentation review." if dxf_technical_ready else "DXF sheets failed one or more quality gates.",
             technical_detail=f"{len(dxf_paths)} DXF sheet(s)",
         ),
         ArtifactReadiness(
@@ -118,6 +175,10 @@ def build_2d_artifact_readiness(
             semantic_valid=dwg_ready,
             visual_qa=dwg_ready,
             customer_ready=dwg_ready,
+            technical_ready=dwg_ready,
+            concept_review_ready=dwg_ready,
+            market_presentation_ready=dwg_ready,
+            construction_ready=False,
             gates=("DWG clean-open",),
             user_message="DWG conversion is ready." if dwg_ready else dwg_skip_reason or "DWG conversion failed.",
             technical_detail=dwg_skip_reason or "",
@@ -158,11 +219,15 @@ def write_artifact_quality_report(
         f"- Project: `{project_id}`",
         f"- Version: `{version_id or 'unknown'}`",
         "",
-        "| Artifact | State | Customer ready | Message |",
-        "|---|---|---:|---|",
+        "| Artifact | State | Technical | Concept review | Market presentation | Construction | Message |",
+        "|---|---|---:|---:|---:|---:|---|",
     ]
     for item in readiness:
-        lines.append(f"| {item.artifact_role} | {item.state} | {str(item.customer_ready).lower()} | {item.user_message.replace('|', '/')} |")
+        lines.append(
+            f"| {item.artifact_role} | {item.state} | {str(item.technical_ready).lower()} | "
+            f"{str(item.concept_review_ready).lower()} | {str(item.market_presentation_ready).lower()} | "
+            f"{str(item.construction_ready).lower()} | {item.user_message.replace('|', '/')} |"
+        )
     concept = payload["concept_package"]
     lines.extend(
         [

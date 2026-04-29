@@ -285,6 +285,11 @@ def _concept_package_metadata(adapter_result: ProductConceptAdapterResult) -> di
     return {
         "enabled": True,
         "readiness": "ready",
+        "readiness_label": "Concept 2D technical-ready; market presentation depends on visual QA gates.",
+        "technical_ready": True,
+        "concept_review_ready": True,
+        "market_presentation_ready": False,
+        "construction_ready": False,
         "fallback_reason": None,
         "source": "product_concept_adapter",
         "sheet_count": len(sheets),

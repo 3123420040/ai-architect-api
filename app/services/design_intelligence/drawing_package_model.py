@@ -60,9 +60,11 @@ def compile_drawing_package(concept_model: ArchitecturalConceptModel) -> Drawing
             "level_id": room.level_id,
             "label_vi": room.label_vi,
             "room_type": room.room_type,
+            "room_type_vi": _room_type_label_vi(room.room_type),
             "width_m": _room_extent(room.polygon.value)[0],
             "depth_m": _room_extent(room.polygon.value)[1],
             "area_m2": room.area_m2.value,
+            "review_note": _room_review_note(room.room_type, _room_extent(room.polygon.value)),
         }
         for room in concept_model.rooms
     )
@@ -76,6 +78,7 @@ def compile_drawing_package(concept_model: ArchitecturalConceptModel) -> Drawing
             "height_m": opening.height_m.value,
             "wall_id": opening.wall_id,
             "operation": _operation_note(opening.operation.value if opening.operation else None),
+            "review_note": "Vị trí concept; xác nhận hướng mở và chi tiết ở bước thiết kế tiếp theo.",
         }
         for opening in concept_model.openings
     )
@@ -220,6 +223,48 @@ def _operation_note(value: Any) -> str:
         "vent_louver": "ô thoáng thông gió",
         "unspecified": "concept",
     }.get(text, text.replace("_", " "))
+
+
+def _room_type_label_vi(room_type: str | None) -> str:
+    text = str(room_type or "").strip().lower()
+    if "bedroom" in text:
+        return "Phòng ngủ"
+    if "bath" in text or "wc" in text:
+        return "WC / tắm"
+    if "kitchen" in text or "dining" in text:
+        return "Bếp / ăn"
+    if "living" in text:
+        return "Sinh hoạt chung"
+    if "stair" in text or "lightwell" in text or "core" in text:
+        return "Lõi thang / lấy sáng"
+    if "storage" in text:
+        return "Kho / lưu trữ"
+    if "laundry" in text or "service" in text:
+        return "Giặt phơi / kỹ thuật"
+    if "parking" in text or "garage" in text:
+        return "Đậu xe / dịch vụ"
+    if "terrace" in text or "garden" in text or "balcony" in text:
+        return "Không gian ngoài"
+    if "worship" in text:
+        return "Thờ / yên tĩnh"
+    if text:
+        return text.replace("_", " ").title()
+    return "Không gian concept"
+
+
+def _room_review_note(room_type: str | None, extent: tuple[float, float]) -> str:
+    text = str(room_type or "").strip().lower()
+    if min(extent) < 1.35:
+        return "Cần kiểm tra bề ngang khi phát triển thiết kế."
+    if "stair" in text or "lightwell" in text or "core" in text:
+        return "Lõi đứng concept để đọc thông tầng."
+    if "bath" in text or "wc" in text or "laundry" in text:
+        return "Nhóm ướt/service để kiểm tra stacking."
+    if "storage" in text:
+        return "Điểm lưu trữ theo ưu tiên brief."
+    if "terrace" in text or "garden" in text or "balcony" in text:
+        return "Không gian ngoài trời/thoáng ở mức concept."
+    return "Kích thước sơ bộ để review công năng."
 
 
 def _room_extent(points: tuple[tuple[float, float], ...]) -> tuple[float, float]:

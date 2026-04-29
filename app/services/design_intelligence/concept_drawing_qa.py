@@ -150,8 +150,8 @@ def _schedule_has_rows(package: DrawingPackageModel, schedule_type: str, minimum
 
 def _schedule_columns_present(package: DrawingPackageModel) -> bool:
     expected_by_type = {
-        "room_area": {"room_id", "level_id", "label_vi", "room_type", "width_m", "depth_m", "area_m2"},
-        "door_window": {"opening_id", "level_id", "type", "type_vi", "width_m", "height_m", "wall_id", "operation"},
+        "room_area": {"room_id", "level_id", "label_vi", "room_type", "room_type_vi", "width_m", "depth_m", "area_m2", "review_note"},
+        "door_window": {"opening_id", "level_id", "type", "type_vi", "width_m", "height_m", "wall_id", "operation", "review_note"},
         "assumptions": {"note"},
     }
     found = {schedule.schedule_type: schedule for sheet in package.sheets for schedule in sheet.schedules}

@@ -99,6 +99,10 @@ def serialize_bundle(bundle: ProfessionalDeliverableBundle) -> dict[str, Any]:
     latest_job = max(bundle.jobs, key=lambda item: item.created_at, default=None)
     assets = list(bundle.assets)
     retryable = bool(latest_job and latest_job.status == "failed")
+    concept_package = (bundle.runtime_metadata_json or {}).get("concept_2d")
+    technical_details = dict(bundle.technical_details_json or {})
+    if concept_package is not None:
+        technical_details.setdefault("concept_package", concept_package)
     return {
         "bundle_id": bundle.id,
         "version_id": bundle.version_id,
@@ -111,7 +115,8 @@ def serialize_bundle(bundle: ProfessionalDeliverableBundle) -> dict[str, Any]:
         "missing_artifacts": bundle.missing_artifacts_json or [],
         "retryable": retryable,
         "user_message": bundle.user_message,
-        "technical_details": bundle.technical_details_json or {},
+        "technical_details": technical_details,
+        "concept_package": concept_package,
         "assets": [
             {
                 "url": resolve_browser_asset_url(asset.public_url) or asset.public_url,
@@ -122,6 +127,7 @@ def serialize_bundle(bundle: ProfessionalDeliverableBundle) -> dict[str, Any]:
                 "status": asset.status,
                 "skip_reason": asset.skip_reason,
                 "validation_error": asset.validation_error,
+                "metadata": asset.metadata_json or {},
             }
             for asset in assets
         ],
@@ -211,6 +217,7 @@ def register_file_artifact(
     content_type: str,
     status: str = "ready",
     validation_error: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> ProfessionalDeliverableAsset:
     if not file_path.exists() or not file_path.is_file() or file_path.stat().st_size <= 0:
         raise FileNotFoundError(str(file_path))
@@ -221,6 +228,11 @@ def register_file_artifact(
     public_url = f"/media/{relative}" if not str(relative).startswith("/") else f"/media/{relative}"
     byte_size = file_path.stat().st_size if file_path.exists() else 0
     storage_key = str(file_path)
+    asset_metadata = {
+        **(metadata or {}),
+        "source_path": storage_key,
+        "public_url": public_url,
+    }
     existing = db.scalar(
         select(ProfessionalDeliverableAsset).where(
             ProfessionalDeliverableAsset.bundle_id == bundle.id,
@@ -237,6 +249,7 @@ def register_file_artifact(
         existing.status = status
         existing.validation_error = validation_error
         existing.checksum = checksum
+        existing.metadata_json = asset_metadata
         db.flush()
         return existing
     asset = ProfessionalDeliverableAsset(
@@ -250,6 +263,7 @@ def register_file_artifact(
         status=status,
         validation_error=validation_error,
         checksum=checksum,
+        metadata_json=asset_metadata,
     )
     db.add(asset)
     db.flush()

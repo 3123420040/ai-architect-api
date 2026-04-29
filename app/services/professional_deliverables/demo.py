@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import tempfile
@@ -103,6 +104,8 @@ def generate_project_2d_bundle(
     require_dwg: bool | None = None,
     project_dir: Path | None = None,
     sheets: tuple | None = None,
+    concept_package_metadata: dict[str, Any] | None = None,
+    concept_fallback_reason: str | None = None,
 ) -> Sprint1BundleResult:
     if require_dwg is None:
         require_dwg = bool(os.environ.get("CI"))
@@ -179,9 +182,18 @@ def generate_project_2d_bundle(
         bundle_id=None,
         readiness=readiness,
         root=project_dir,
+        concept_package=concept_package_metadata,
+        fallback_reason=concept_fallback_reason,
     )
     inventory = build_file_inventory([*dxf_paths, *dwg_paths, pdf_path, artifact_quality_report_json, artifact_quality_report_md], project_dir)
     summary_json, summary_md = write_gate_outputs(two_d_dir, gate_results, inventory)
+    if concept_package_metadata is not None or concept_fallback_reason:
+        _annotate_gate_summary(
+            summary_json,
+            summary_md,
+            concept_package_metadata=concept_package_metadata,
+            concept_fallback_reason=concept_fallback_reason,
+        )
     return Sprint1BundleResult(
         project_dir=project_dir,
         two_d_dir=two_d_dir,
@@ -194,6 +206,36 @@ def generate_project_2d_bundle(
         artifact_quality_report_json=artifact_quality_report_json,
         artifact_quality_report_md=artifact_quality_report_md,
     )
+
+
+def _annotate_gate_summary(
+    summary_json: Path,
+    summary_md: Path,
+    *,
+    concept_package_metadata: dict[str, Any] | None,
+    concept_fallback_reason: str | None,
+) -> None:
+    concept_package = concept_package_metadata or {
+        "enabled": False,
+        "readiness": "fallback",
+        "fallback_reason": concept_fallback_reason,
+    }
+    payload = json.loads(summary_json.read_text(encoding="utf-8"))
+    payload["concept_package"] = concept_package
+    summary_json.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    lines = summary_md.read_text(encoding="utf-8").rstrip().splitlines()
+    lines.extend(
+        [
+            "",
+            "## Concept Package",
+            "",
+            f"- Enabled: `{str(concept_package.get('enabled', False)).lower()}`",
+            f"- Readiness: `{concept_package.get('readiness', 'unknown')}`",
+        ]
+    )
+    if concept_package.get("fallback_reason"):
+        lines.append(f"- Fallback reason: `{concept_package['fallback_reason']}`")
+    summary_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def generate_golden_bundle(output_root: Path | None = None, *, require_dwg: bool | None = None) -> Sprint1BundleResult:

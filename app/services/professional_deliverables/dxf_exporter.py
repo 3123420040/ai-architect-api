@@ -210,7 +210,7 @@ def _draw_cover_index(msp, project: DrawingProject) -> None:
     _add_text(msp, project.concept_note, (0.0, 8.45), height=0.18, layer="A-ANNO-TEXT")
     index_lines = (
         "Muc luc: A-100 site, A-101 floor plans, A-201 elevation, A-301 section.",
-        "Schedules: A-601 room areas, A-602 doors/windows, A-603 assumptions and style notes.",
+        "Schedules: A-601 room areas, A-602 doors/windows, A-901 assumptions and style notes.",
         "Pham vi: concept/schematic only, not for construction or permit use.",
     )
     y = 7.9

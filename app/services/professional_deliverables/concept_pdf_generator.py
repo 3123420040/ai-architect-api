@@ -123,7 +123,7 @@ def concept_sheet_specs(package: DrawingPackageModel) -> tuple[SheetSpec, ...]:
         elif sheet.kind == "door_window_schedule":
             sheets.append(SheetSpec(sheet.number, sheet.title, "A-602-door-window-schedule", "door_window_schedule", scale=sheet.scale))
         elif sheet.kind == "assumptions_style_notes":
-            sheets.append(SheetSpec(sheet.number, sheet.title, "A-603-assumptions-style-notes", "assumptions_style_notes", scale=sheet.scale))
+            sheets.append(SheetSpec(sheet.number, sheet.title, "A-901-assumptions-style-notes", "assumptions_style_notes", scale=sheet.scale))
     return tuple(sheets)
 
 

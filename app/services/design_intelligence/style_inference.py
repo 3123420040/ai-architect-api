@@ -1,9 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 
 from app.services.design_intelligence.customer_understanding import CustomerUnderstanding
 from app.services.professional_deliverables.style_knowledge import StyleKnowledgeBase, StyleProfile, normalize_signal
+
+
+@dataclass(frozen=True)
+class StyleEvidence:
+    signal: str
+    source: str
+    polarity: str = "positive"
 
 
 @dataclass(frozen=True)
@@ -12,6 +20,7 @@ class StyleCandidate:
     display_name: str
     confidence: float
     evidence: tuple[str, ...]
+    source_evidence: tuple[StyleEvidence, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -41,16 +50,18 @@ def infer_style(
     candidates: list[StyleCandidate] = []
 
     for profile in kb.all():
-        raw_score, evidence = kb.score_profile(profile, text_signals=text_signals, visual_signals=image_signals)
-        penalty, dislike_evidence = _dislike_penalty(profile, understanding.dislikes)
-        score = max(0.0, raw_score - penalty)
+        raw_score, positive_evidence = _score_profile_with_sources(profile, text_signals=text_signals, visual_signals=image_signals)
+        dislike_evidence = _dislike_evidence(profile, understanding.dislikes)
+        score = 0.0 if dislike_evidence else raw_score
         confidence = _confidence(score, has_image_signals=bool(image_signals))
+        all_source_evidence = (*positive_evidence, *dislike_evidence)
         candidates.append(
             StyleCandidate(
                 style_id=profile.style_id,
                 display_name=profile.display_name,
                 confidence=confidence,
-                evidence=tuple(dict.fromkeys((*evidence, *dislike_evidence))),
+                evidence=tuple(dict.fromkeys(_evidence_label(item) for item in all_source_evidence)),
+                source_evidence=tuple(dict.fromkeys(all_source_evidence)),
             )
         )
 
@@ -70,13 +81,43 @@ def infer_style(
 def _confidence(score: float, *, has_image_signals: bool) -> float:
     if score <= 0:
         return 0.0
-    denominator = 8.0 if has_image_signals else 7.0
+    denominator = 8.5 if has_image_signals else 7.5
     return round(min(0.92, score / denominator), 2)
 
 
-def _dislike_penalty(profile: StyleProfile, dislikes: tuple[str, ...]) -> tuple[float, tuple[str, ...]]:
+def _score_profile_with_sources(
+    profile: StyleProfile,
+    *,
+    text_signals: list[str] | tuple[str, ...],
+    visual_signals: list[str] | tuple[str, ...] = (),
+) -> tuple[float, tuple[StyleEvidence, ...]]:
+    normalized_text = [normalize_signal(signal) for signal in text_signals if signal]
+    normalized_visual = [normalize_signal(signal) for signal in visual_signals if signal]
+    evidence: list[StyleEvidence] = []
+    score = 0.0
+
+    for signal in profile.normalized_aliases:
+        if _any_contains(normalized_text, signal):
+            score += 3.0
+            evidence.append(StyleEvidence(signal=signal, source="customer_language"))
+    for signal in profile.normalized_customer_signals:
+        if _any_contains(normalized_text, signal):
+            score += 1.7
+            evidence.append(StyleEvidence(signal=signal, source="customer_language"))
+    for signal in profile.normalized_aliases:
+        if _any_contains(normalized_visual, signal):
+            score += 2.2
+            evidence.append(StyleEvidence(signal=signal, source="reference_image_descriptor"))
+    for signal in profile.normalized_visual_signals:
+        if _any_contains(normalized_visual, signal):
+            score += 1.4
+            evidence.append(StyleEvidence(signal=signal, source="reference_image_descriptor"))
+    return score, tuple(dict.fromkeys(evidence))
+
+
+def _dislike_evidence(profile: StyleProfile, dislikes: tuple[str, ...]) -> tuple[StyleEvidence, ...]:
     if not dislikes:
-        return 0.0, ()
+        return ()
     normalized_dislikes = [normalize_signal(dislike) for dislike in dislikes]
     profile_terms = (
         normalize_signal(profile.style_id),
@@ -84,13 +125,27 @@ def _dislike_penalty(profile: StyleProfile, dislikes: tuple[str, ...]) -> tuple[
         *profile.normalized_customer_signals,
         *profile.normalized_visual_signals,
     )
-    matched = tuple(term for term in profile_terms if any(term and term in dislike for dislike in normalized_dislikes))
-    if matched:
-        return 4.0, tuple(f"explicit_dislike:{term}" for term in dict.fromkeys(matched))
-    return 0.0, ()
+    matched = tuple(term for term in profile_terms if any(term and _contains(dislike, term) for dislike in normalized_dislikes))
+    return tuple(StyleEvidence(signal=term, source="customer_language", polarity="explicit_dislike") for term in dict.fromkeys(matched))
 
 
 def _confirmation_question(candidates: list[StyleCandidate]) -> str:
     if len(candidates) >= 2 and candidates[0].confidence > 0 and candidates[1].confidence > 0:
         return f"Em đang thấy hai hướng hợp: {candidates[0].display_name} hoặc {candidates[1].display_name}. Anh/chị thích hướng nào hơn?"
     return "Anh/chị thích nhà theo cảm giác xanh mát hiện đại, tối giản ấm, hay Indochine nhẹ hơn?"
+
+
+def _any_contains(values: list[str], signal: str) -> bool:
+    return any(_contains(value, signal) for value in values)
+
+
+def _contains(value: str, signal: str) -> bool:
+    if not signal:
+        return False
+    return re.search(rf"(?<!\w){re.escape(signal)}(?!\w)", value) is not None
+
+
+def _evidence_label(evidence: StyleEvidence) -> str:
+    if evidence.polarity == "explicit_dislike":
+        return f"explicit_dislike:{evidence.signal}"
+    return evidence.signal

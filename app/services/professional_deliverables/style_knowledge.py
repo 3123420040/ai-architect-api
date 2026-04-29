@@ -23,9 +23,12 @@ REQUIRED_PROFILE_FIELDS = (
     "spatial_rules",
     "room_defaults",
     "opening_rules",
+    "default_rules",
+    "facade_intent",
     "facade_rules",
     "material_palette",
     "drawing_rules",
+    "drawing_notes",
     "avoid_rules",
     "validation_rules",
     "explanation_templates",
@@ -37,7 +40,18 @@ UNSAFE_SCOPE_TERMS = (
     "structural " + "design",
     "mep " + "design",
     "code " + "compliant",
+    "code " + "compliance",
     "construction " + "ready",
+    "legal " + "compliance",
+    "geotechnical " + "report",
+    "permit " + "drawings",
+    "ban ve " + "thi cong",
+    "ho so " + "xin phep",
+    "thiet ke " + "ket cau",
+    "thiet ke " + "dien nuoc",
+    "bao cao " + "dia chat",
+    "phap ly " + "day du",
+    "dat " + "quy chuan",
 )
 
 
@@ -61,6 +75,13 @@ def _require_mapping(payload: dict[str, Any], field_name: str) -> dict[str, Any]
     return dict(value)
 
 
+def _require_text(payload: dict[str, Any], field_name: str) -> str:
+    value = payload.get(field_name)
+    if not isinstance(value, str) or not value.strip():
+        raise StyleKnowledgeError(f"Style profile {payload.get('style_id') or '<unknown>'} missing {field_name}")
+    return value
+
+
 def _assert_safe_scope(payload: dict[str, Any]) -> None:
     searchable = normalize_signal(json.dumps(payload, ensure_ascii=False))
     for term in UNSAFE_SCOPE_TERMS:
@@ -79,9 +100,12 @@ class StyleProfile:
     spatial_rules: dict[str, Any]
     room_defaults: dict[str, Any]
     opening_rules: dict[str, Any]
+    default_rules: dict[str, Any]
+    facade_intent: str
     facade_rules: dict[str, Any]
     material_palette: dict[str, Any]
     drawing_rules: dict[str, Any]
+    drawing_notes: tuple[str, ...]
     avoid_rules: tuple[str, ...]
     validation_rules: tuple[str, ...]
     explanation_templates: dict[str, str]
@@ -103,9 +127,12 @@ class StyleProfile:
             spatial_rules=_require_mapping(payload, "spatial_rules"),
             room_defaults=_require_mapping(payload, "room_defaults"),
             opening_rules=_require_mapping(payload, "opening_rules"),
+            default_rules=_require_mapping(payload, "default_rules"),
+            facade_intent=_require_text(payload, "facade_intent"),
             facade_rules=_require_mapping(payload, "facade_rules"),
             material_palette=_require_mapping(payload, "material_palette"),
             drawing_rules=_require_mapping(payload, "drawing_rules"),
+            drawing_notes=_require_non_empty_sequence(payload, "drawing_notes"),
             avoid_rules=_require_non_empty_sequence(payload, "avoid_rules"),
             validation_rules=_require_non_empty_sequence(payload, "validation_rules"),
             explanation_templates={str(key): str(value) for key, value in templates.items()},

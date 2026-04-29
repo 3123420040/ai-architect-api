@@ -100,7 +100,7 @@ def test_concept_pdf_and_dxf_render_from_source_geometry(tmp_path: Path):
         "A-301-sections.dxf",
         "A-601-room-area-schedule.dxf",
         "A-602-door-window-schedule.dxf",
-        "A-603-assumptions-style-notes.dxf",
+        "A-901-assumptions-style-notes.dxf",
     }
     assert expected_dxf_names <= {path.name for path in result.bundle.dxf_paths}
     site_dxf = result.bundle.two_d_dir / "A-100-site.dxf"

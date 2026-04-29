@@ -122,6 +122,7 @@ def serialize_bundle(bundle: ProfessionalDeliverableBundle) -> dict[str, Any]:
                 "status": asset.status,
                 "skip_reason": asset.skip_reason,
                 "validation_error": asset.validation_error,
+                "metadata": asset.metadata_json or {},
             }
             for asset in assets
         ],
@@ -211,6 +212,7 @@ def register_file_artifact(
     content_type: str,
     status: str = "ready",
     validation_error: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> ProfessionalDeliverableAsset:
     if not file_path.exists() or not file_path.is_file() or file_path.stat().st_size <= 0:
         raise FileNotFoundError(str(file_path))
@@ -221,6 +223,11 @@ def register_file_artifact(
     public_url = f"/media/{relative}" if not str(relative).startswith("/") else f"/media/{relative}"
     byte_size = file_path.stat().st_size if file_path.exists() else 0
     storage_key = str(file_path)
+    asset_metadata = {
+        **(metadata or {}),
+        "source_path": storage_key,
+        "public_url": public_url,
+    }
     existing = db.scalar(
         select(ProfessionalDeliverableAsset).where(
             ProfessionalDeliverableAsset.bundle_id == bundle.id,
@@ -237,6 +244,7 @@ def register_file_artifact(
         existing.status = status
         existing.validation_error = validation_error
         existing.checksum = checksum
+        existing.metadata_json = asset_metadata
         db.flush()
         return existing
     asset = ProfessionalDeliverableAsset(
@@ -250,6 +258,7 @@ def register_file_artifact(
         status=status,
         validation_error=validation_error,
         checksum=checksum,
+        metadata_json=asset_metadata,
     )
     db.add(asset)
     db.flush()

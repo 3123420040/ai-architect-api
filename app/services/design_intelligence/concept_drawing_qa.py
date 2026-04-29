@@ -283,5 +283,5 @@ def _sheet_filename(number: str, kind: str) -> str:
     if kind == "door_window_schedule":
         return "A-602-door-window-schedule.dxf"
     if kind == "assumptions_style_notes":
-        return "A-603-assumptions-style-notes.dxf"
+        return "A-901-assumptions-style-notes.dxf"
     return f"{number.lower()}-{kind}.dxf"

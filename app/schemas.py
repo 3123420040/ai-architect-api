@@ -274,6 +274,7 @@ class ProfessionalDeliverableAssetSummary(BaseModel):
     status: str = "ready"
     skip_reason: str | None = None
     validation_error: str | None = None
+    metadata: dict = Field(default_factory=dict)
 
 
 class ProfessionalDeliverableBundleOut(BaseModel):

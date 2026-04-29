@@ -133,6 +133,8 @@ def write_artifact_quality_report(
     bundle_id: str | None,
     readiness: tuple[ArtifactReadiness, ...],
     root: Path,
+    concept_package: dict[str, Any] | None = None,
+    fallback_reason: str | None = None,
 ) -> tuple[Path, Path]:
     json_path = output_dir / "artifact_quality_report.json"
     md_path = output_dir / "artifact_quality_report.md"
@@ -141,6 +143,12 @@ def write_artifact_quality_report(
         "version_id": version_id,
         "bundle_id": bundle_id,
         "artifacts": [item.as_dict(root) for item in readiness],
+        "concept_package": concept_package
+        or {
+            "enabled": False,
+            "readiness": "fallback" if fallback_reason else "not_requested",
+            "fallback_reason": fallback_reason,
+        },
     }
     json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -155,6 +163,17 @@ def write_artifact_quality_report(
     ]
     for item in readiness:
         lines.append(f"| {item.artifact_role} | {item.state} | {str(item.customer_ready).lower()} | {item.user_message.replace('|', '/')} |")
+    concept = payload["concept_package"]
+    lines.extend(
+        [
+            "",
+            "## Concept Package",
+            "",
+            f"- Enabled: `{str(concept.get('enabled', False)).lower()}`",
+            f"- Readiness: `{concept.get('readiness', 'unknown')}`",
+        ]
+    )
+    if concept.get("fallback_reason"):
+        lines.append(f"- Fallback reason: `{concept['fallback_reason']}`")
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return json_path, md_path
-

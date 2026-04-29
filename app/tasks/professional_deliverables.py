@@ -8,6 +8,8 @@ from app.db import SessionLocal
 from sqlalchemy import select
 
 from app.models import DesignVersion, ProfessionalDeliverableAsset, ProfessionalDeliverableBundle, ProfessionalDeliverableJob, Project
+from app.services.design_intelligence.product_concept_adapter import ProductConceptAdapterResult, adapt_live_design_version_to_concept_source
+from app.services.professional_deliverables.concept_pdf_generator import concept_sheet_specs
 from app.services.professional_deliverables.demo import generate_golden_bundle, generate_project_2d_bundle
 from app.services.professional_deliverables.geometry_adapter import geometry_to_drawing_project
 from app.services.professional_deliverables.orchestrator import (
@@ -207,6 +209,7 @@ def _register_file_if_exists(
     asset_role: str,
     content_type: str,
     status: str = "partial",
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     if file_path and file_path.exists() and file_path.is_file() and file_path.stat().st_size > 0:
         register_file_artifact(
@@ -218,21 +221,125 @@ def _register_file_if_exists(
             asset_role=asset_role,
             content_type=content_type,
             status=status,
+            metadata=metadata,
         )
 
 
-def _register_sprint1_artifacts(db, *, bundle: ProfessionalDeliverableBundle, root: Path, sprint1: Any) -> None:
-    _register_file_if_exists(db, bundle=bundle, file_path=getattr(sprint1, "pdf_path", None), root=root, asset_type="2d", asset_role="pdf", content_type="application/pdf")
+def _register_sprint1_artifacts(
+    db,
+    *,
+    bundle: ProfessionalDeliverableBundle,
+    root: Path,
+    sprint1: Any,
+    concept_package_metadata: dict[str, Any] | None = None,
+    fallback_reason: str | None = None,
+) -> None:
+    sheet_metadata = _sheet_metadata_by_filename(concept_package_metadata)
+    pdf_metadata = _pdf_asset_metadata(concept_package_metadata, fallback_reason)
+    _register_file_if_exists(
+        db,
+        bundle=bundle,
+        file_path=getattr(sprint1, "pdf_path", None),
+        root=root,
+        asset_type="2d",
+        asset_role="pdf",
+        content_type="application/pdf",
+        metadata=pdf_metadata,
+    )
     _register_file_if_exists(db, bundle=bundle, file_path=getattr(sprint1, "gate_summary_json", None), root=root, asset_type="gate_summary", asset_role="sprint1_gate_summary_json", content_type="application/json")
     _register_file_if_exists(db, bundle=bundle, file_path=getattr(sprint1, "gate_summary_md", None), root=root, asset_type="gate_summary", asset_role="sprint1_gate_summary_md", content_type="text/markdown")
     _register_file_if_exists(db, bundle=bundle, file_path=getattr(sprint1, "artifact_quality_report_json", None), root=root, asset_type="quality_report", asset_role="artifact_quality_report_json", content_type="application/json")
     _register_file_if_exists(db, bundle=bundle, file_path=getattr(sprint1, "artifact_quality_report_md", None), root=root, asset_type="quality_report", asset_role="artifact_quality_report_md", content_type="text/markdown")
     for dxf_path in getattr(sprint1, "dxf_paths", []) or []:
-        _register_file_if_exists(db, bundle=bundle, file_path=dxf_path, root=root, asset_type="2d", asset_role="dxf", content_type="application/dxf")
+        _register_file_if_exists(
+            db,
+            bundle=bundle,
+            file_path=dxf_path,
+            root=root,
+            asset_type="2d",
+            asset_role="dxf",
+            content_type="application/dxf",
+            metadata=sheet_metadata.get(Path(dxf_path).name, _fallback_asset_metadata(fallback_reason)),
+        )
     for dwg_path in getattr(sprint1, "dwg_paths", []) or []:
         _register_file_if_exists(db, bundle=bundle, file_path=dwg_path, root=root, asset_type="2d", asset_role="dwg", content_type="application/dwg")
     if not getattr(sprint1, "dwg_paths", []) and (reason := _dwg_skip_reason(sprint1)):
         register_skipped_artifact(db, bundle=bundle, asset_type="2d", asset_role="dwg", skip_reason=reason)
+
+
+def _concept_package_metadata(adapter_result: ProductConceptAdapterResult) -> dict[str, Any] | None:
+    package = adapter_result.drawing_package
+    if package is None:
+        return None
+    sheets = [
+        {
+            "sheet_number": sheet.number,
+            "sheet_title": sheet.title,
+            "sheet_kind": sheet.kind,
+            "readiness": "ready",
+            "state": "ready",
+            "filename": spec.filename_stem + ".dxf",
+        }
+        for sheet, spec in zip(package.sheets, concept_sheet_specs(package), strict=True)
+    ]
+    return {
+        "enabled": True,
+        "readiness": "ready",
+        "fallback_reason": None,
+        "source": "product_concept_adapter",
+        "sheet_count": len(sheets),
+        "sheets": sheets,
+        "qa_bounds": package.qa_bounds,
+    }
+
+
+def _adapter_fallback_reason(adapter_result: ProductConceptAdapterResult) -> str | None:
+    if adapter_result.is_ready:
+        return None
+    if adapter_result.fallback_reason:
+        return adapter_result.fallback_reason
+    blockers = [blocker.as_dict() for blocker in adapter_result.blocker_reasons]
+    if blockers:
+        codes = ", ".join(str(blocker["code"]) for blocker in blockers)
+        return f"Concept 2D adapter {adapter_result.status}: {codes}"
+    return f"Concept 2D adapter {adapter_result.status}"
+
+
+def _sheet_metadata_by_filename(concept_package_metadata: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    if not concept_package_metadata:
+        return {}
+    return {
+        str(sheet["filename"]): {
+            "concept_package": True,
+            "sheet_number": sheet["sheet_number"],
+            "sheet_title": sheet["sheet_title"],
+            "sheet_kind": sheet["sheet_kind"],
+            "readiness": sheet["readiness"],
+            "state": sheet["state"],
+        }
+        for sheet in concept_package_metadata.get("sheets", [])
+    }
+
+
+def _pdf_asset_metadata(concept_package_metadata: dict[str, Any] | None, fallback_reason: str | None) -> dict[str, Any]:
+    if concept_package_metadata:
+        return {
+            "concept_package": True,
+            "readiness": "ready",
+            "state": "ready",
+            "sheet_count": concept_package_metadata["sheet_count"],
+            "sheets": concept_package_metadata["sheets"],
+        }
+    return _fallback_asset_metadata(fallback_reason)
+
+
+def _fallback_asset_metadata(fallback_reason: str | None) -> dict[str, Any]:
+    return {
+        "concept_package": False,
+        "readiness": "fallback",
+        "state": "ready",
+        "fallback_reason": fallback_reason,
+    }
 
 
 def _register_sprint2_artifacts(db, *, bundle: ProfessionalDeliverableBundle, root: Path) -> None:
@@ -325,23 +432,64 @@ def run_professional_deliverable_bundle_task(job_id: str) -> dict:
             mark_job_stage(db, job, stage="adapter", progress=10, bundle=bundle)
             db.commit()
 
+            concept_adapter = adapt_live_design_version_to_concept_source(
+                project_id=project.id,
+                project_name=project.name,
+                brief_json=project.brief_json,
+                geometry_json=version.geometry_json,
+                resolved_style_params=version.resolved_style_params,
+                generation_metadata=version.generation_metadata,
+                version_id=version.id,
+            )
+            concept_package_metadata = _concept_package_metadata(concept_adapter)
+            concept_fallback_reason = _adapter_fallback_reason(concept_adapter)
+            bundle.runtime_metadata_json = {
+                **(bundle.runtime_metadata_json or {}),
+                "concept_2d": concept_package_metadata
+                or {
+                    "enabled": False,
+                    "readiness": "fallback",
+                    "fallback_reason": concept_fallback_reason,
+                    "adapter_status": concept_adapter.status,
+                    "blockers": [blocker.as_dict() for blocker in concept_adapter.blocker_reasons],
+                },
+            }
             drawing_project = geometry_to_drawing_project(
                 project_id=project.id,
                 project_name=project.name,
                 brief_json=project.brief_json,
                 geometry_json=version.geometry_json,
+                version_id=version.id,
             )
             scene = build_scene_from_project(drawing_project)
 
             mark_job_stage(db, job, stage="export_2d", progress=25, bundle=bundle)
             db.commit()
-            sprint1 = generate_project_2d_bundle(
-                drawing_project,
-                root.parent.parent.parent,
-                require_dwg=False,
-                project_dir=root,
+            if concept_adapter.is_ready and concept_adapter.drawing_package is not None and concept_adapter.drawing_project is not None:
+                sprint1 = generate_project_2d_bundle(
+                    concept_adapter.drawing_project,
+                    root.parent.parent.parent,
+                    require_dwg=False,
+                    project_dir=root,
+                    sheets=concept_sheet_specs(concept_adapter.drawing_package),
+                    concept_package_metadata=concept_package_metadata,
+                )
+            else:
+                sprint1 = generate_project_2d_bundle(
+                    drawing_project,
+                    root.parent.parent.parent,
+                    require_dwg=False,
+                    project_dir=root,
+                    concept_fallback_reason=concept_fallback_reason,
+                )
+            _register_sprint1_artifacts(
+                db,
+                bundle=bundle,
+                root=root,
+                sprint1=sprint1,
+                concept_package_metadata=concept_package_metadata,
+                fallback_reason=concept_fallback_reason,
             )
-            _register_sprint1_artifacts(db, bundle=bundle, root=root, sprint1=sprint1)
             db.commit()
 
             mark_job_stage(db, job, stage="export_3d", progress=50, bundle=bundle)

@@ -133,7 +133,7 @@ def compile_drawing_package(concept_model: ArchitecturalConceptModel) -> Drawing
                 style_notes=style_notes,
             ),
             DrawingSheetModel(
-                "A-603",
+                "A-901",
                 "Giả định và ghi chú style",
                 "assumptions_style_notes",
                 labels=(str(concept_model.style.value) if concept_model.style else "style_pending", *style_notes[:3]),

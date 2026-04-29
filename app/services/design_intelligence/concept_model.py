@@ -160,7 +160,7 @@ def seed_concept_model(
     depth = float(site_facts["depth_m"])
     area = float(site_facts.get("area_m2") or width * depth)
     boundary: tuple[Point, ...] = ((0.0, 0.0), (width, 0.0), (width, depth), (0.0, depth))
-    default_floors = 1 if site_facts.get("project_type") == "apartment_renovation" else 2
+    default_floors = _default_floor_count(site_facts, understanding.room_program_hints)
     floors = int(understanding.room_program_hints.get("floors") or default_floors)
     levels = tuple(
         ConceptLevel(
@@ -185,8 +185,10 @@ def seed_concept_model(
     assumption_items = list(understanding.assumptions)
     if derived_apartment_rectangle:
         assumption_items.append("Assume a simple apartment rectangle from stated area until an as-built plan is provided.")
+    if "floors" not in understanding.room_program_hints and site_facts.get("project_type") != "apartment_renovation":
+        assumption_items.append(f"Assume {floors} concept floors from lot proportions and typology until the homeowner confirms.")
     assumptions = tuple(
-        rule_default(item, item, confidence=0.76, needs_confirmation="rectangle" in item.lower())
+        rule_default(item, item, confidence=0.76, needs_confirmation="assume" in item.lower() or "rectangle" in item.lower())
         for item in assumption_items
     )
 
@@ -228,6 +230,23 @@ def seed_concept_model(
     )
     validate_concept_model(model)
     return model
+
+
+def _default_floor_count(site_facts: dict[str, Any], room_program_hints: dict[str, Any]) -> int:
+    if site_facts.get("project_type") == "apartment_renovation":
+        return 1
+    width = float(site_facts.get("width_m") or 0)
+    depth = float(site_facts.get("depth_m") or 0)
+    bedrooms = room_program_hints.get("bedrooms")
+    if site_facts.get("project_type") == "villa" and width >= 8.0:
+        return 2
+    if bedrooms and int(bedrooms) >= 4:
+        return 3
+    if width <= 6.0 and depth >= 18.0:
+        return 3
+    if depth >= 24.0:
+        return 3
+    return 2
 
 
 def validate_concept_model(model: ArchitecturalConceptModel) -> None:

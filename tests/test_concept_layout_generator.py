@@ -25,6 +25,16 @@ def _width(room) -> float:
     return max_x - min_x
 
 
+def _y1(room) -> float:
+    _, min_y, _, _ = _bounds(room)
+    return min_y
+
+
+def _y2(room) -> float:
+    _, _, _, max_y = _bounds(room)
+    return max_y
+
+
 def _assert_fixtures_fit_rooms(layout) -> None:
     rooms = {room.id: room for room in layout.rooms}
     for fixture in layout.fixtures:
@@ -80,6 +90,104 @@ def test_minimal_warm_5x20_low_maintenance_layout_is_valid():
     _assert_fixtures_fit_rooms(layout)
     assert all(room.polygon.assumption for room in layout.rooms)
     assert all(room.area_m2.value > 0 for room in layout.rooms)
+
+
+def test_low_communication_5x20_uses_conservative_defaults_with_provenance():
+    understanding, style, concept = _seed_from_text(
+        "Need a 5x20 family house, simple, bright, enough bedrooms, not too expensive."
+    )
+    layout = generate_concept_layout(concept_model=concept, understanding=understanding, style_id=style.selected_style_id)
+
+    validate_layout(layout)
+    assert len(layout.levels) == 3
+    assert len([room for room in layout.rooms if room.room_type == "bedroom"]) == 3
+    assert len([room for room in layout.rooms if room.room_type == "wc"]) == 3
+    assert max(room.area_m2.value for room in layout.rooms if room.room_type == "kitchen_dining") <= 24
+    assert any("Assume 3 concept floors" in assumption.value and assumption.needs_confirmation for assumption in layout.assumptions)
+    assert all(room.polygon.assumption for room in layout.rooms)
+
+
+def test_elder_townhouse_stacks_wet_core_and_keeps_ground_bedroom_accessible():
+    understanding, style, concept = _seed_from_text(
+        "Nha pho 5x20m, 4 tang, 4 phong ngu, 4 wc, co ong ba, phong ngu tang tret, "
+        "hien dai nhiet doi, thoang va nhieu anh sang."
+    )
+    layout = generate_concept_layout(concept_model=concept, understanding=understanding, style_id=style.selected_style_id)
+
+    validate_layout(layout)
+    elder_room = next(room for room in layout.rooms if room.label_vi == "Phòng ngủ ông bà")
+    wc_rooms = [room for room in layout.rooms if room.room_type == "wc"]
+    base_x1, _, base_x2, _ = _bounds(next(room for room in wc_rooms if room.level_id == "L1"))
+
+    assert elder_room.level_id == "L1"
+    assert len(wc_rooms) == 4
+    assert all(min(base_x2, _bounds(room)[2]) - max(base_x1, _bounds(room)[0]) >= 0.45 for room in wc_rooms)
+    assert all(2.0 <= room.area_m2.value <= 8.0 for room in wc_rooms)
+    assert max(room.area_m2.value for room in layout.rooms if room.room_type == "kitchen_dining") <= 24
+
+
+def test_garage_garden_townhouse_has_green_buffer_and_bounded_room_sizes():
+    understanding, style, concept = _seed_from_text(
+        "Nha 7x25m, 3 tang, 4 phong ngu, 4 WC, co gara, san vuon, nhieu cay, hien dai nhiet doi."
+    )
+    layout = generate_concept_layout(concept_model=concept, understanding=understanding, style_id=style.selected_style_id)
+
+    validate_layout(layout)
+    assert any(room.room_type == "garage" and room.level_id == "L1" for room in layout.rooms)
+    assert any(room.room_type == "garden" and room.level_id == "L1" for room in layout.rooms)
+    assert len([room for room in layout.rooms if room.room_type == "wc"]) == 4
+    assert max(room.area_m2.value for room in layout.rooms if room.room_type == "kitchen_dining") <= 36
+    assert max(room.area_m2.value for room in layout.rooms if room.room_type == "bedroom") <= 30
+    assert any(fixture.fixture_type == "plant" and fixture.label_vi == "Mảng xanh" for fixture in layout.fixtures)
+
+
+def test_work_from_home_apartment_adds_separated_work_and_storage_zones():
+    understanding, style, concept = _seed_from_text(
+        "Can ho 95m2, 2 phong ngu, 2 wc, toi gian am, lam viec tai nha, nhieu luu tru."
+    )
+    layout = generate_concept_layout(concept_model=concept, understanding=understanding, style_id=style.selected_style_id)
+
+    validate_layout(layout)
+    work = next(room for room in layout.rooms if room.room_type == "work")
+    storage = next(room for room in layout.rooms if room.room_type == "storage")
+
+    assert len(layout.levels) == 1
+    assert layout.stairs == ()
+    assert 4.0 <= work.area_m2.value <= 8.0
+    assert storage.area_m2.value >= 2.0
+    assert any(fixture.fixture_type == "desk" and fixture.room_id == work.id for fixture in layout.fixtures)
+
+
+def test_compact_studio_uses_flexible_sleeping_zone_without_fake_bedrooms():
+    understanding, style, concept = _seed_from_text(
+        "Can ho studio 35m2, toi gian am, linh hoat, nhieu luu tru, tranh bua bo."
+    )
+    layout = generate_concept_layout(concept_model=concept, understanding=understanding, style_id=style.selected_style_id)
+
+    validate_layout(layout)
+    assert len(layout.levels) == 1
+    assert not any(room.room_type == "bedroom" for room in layout.rooms)
+    assert any(room.room_type == "flex_sleep" for room in layout.rooms)
+    assert any(room.room_type == "storage" for room in layout.rooms)
+    assert any(fixture.fixture_type == "convertible_bed" for fixture in layout.fixtures)
+    assert sum(room.area_m2.value for room in layout.rooms) <= layout.site.area_m2.value
+
+
+def test_shophouse_places_front_business_before_private_family_zone():
+    understanding, style, concept = _seed_from_text(
+        "Nha pho shophouse 5x25m, 3 tang, 3 phong ngu, kinh doanh phia truoc, "
+        "rieng tu gia dinh, co kho."
+    )
+    layout = generate_concept_layout(concept_model=concept, understanding=understanding, style_id=style.selected_style_id)
+
+    validate_layout(layout)
+    business = next(room for room in layout.rooms if room.room_type == "business")
+    living = next(room for room in layout.rooms if room.room_type == "living" and room.level_id == "L1")
+
+    assert business.level_id == "L1"
+    assert _y2(business) <= _y1(living)
+    assert any(room.room_type == "storage" and room.level_id == "L1" for room in layout.rooms)
+    assert any("business/service area as concept zoning" in assumption.value for assumption in layout.assumptions)
 
 
 def test_apartment_indochine_descriptor_layout_remains_valid():

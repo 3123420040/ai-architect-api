@@ -45,20 +45,34 @@ def plan_room_program(
     pattern = patterns[0] if patterns else None
     project_type = understanding.site_facts.get("project_type")
     floors = len(concept_model.levels)
-    bedrooms = int(understanding.room_program_hints.get("bedrooms") or (2 if floors <= 2 else 3))
+    is_studio = bool(understanding.room_program_hints.get("studio"))
+    if is_studio:
+        bedrooms = 0
+    else:
+        default_bedrooms = 2 if project_type == "apartment_renovation" else (2 if floors <= 2 else 3)
+        bedrooms = int(understanding.room_program_hints.get("bedrooms") or default_bedrooms)
+    bathrooms = int(understanding.room_program_hints.get("bathrooms") or (1 if project_type == "apartment_renovation" else min(floors, bedrooms + 1)))
     has_garage = bool(understanding.room_program_hints.get("garage"))
     priorities = set(understanding.family_lifestyle.get("priorities", []) or [])
     wants_storage = bool(understanding.room_program_hints.get("storage") or "storage" in priorities)
+    wants_greenery = bool(understanding.room_program_hints.get("greenery") or "greenery" in priorities)
+    wants_work = bool(understanding.room_program_hints.get("home_office") or understanding.family_lifestyle.get("work_from_home"))
+    wants_business = bool(understanding.room_program_hints.get("business_front"))
+    wants_flexible = bool(understanding.room_program_hints.get("flexible_space"))
 
     if project_type == "apartment_renovation":
         items: list[RoomProgramItem] = [
-            RoomProgramItem("living", "Phòng khách", 1, "core_public"),
+            RoomProgramItem("living", "Sinh hoạt/ngủ linh hoạt" if is_studio else "Phòng khách", 1, "core_public"),
             RoomProgramItem("kitchen_dining", "Bếp và ăn", 1, "core_public"),
             RoomProgramItem("wc", "Vệ sinh", 1, "support"),
         ]
+        if is_studio:
+            items.append(RoomProgramItem("flex_sleep", "Khu ngủ linh hoạt", 1, "flexible_small_space"))
         for index in range(bedrooms):
             label = "Phòng ngủ master" if index == 0 else f"Phòng ngủ {index + 1}"
             items.append(RoomProgramItem("bedroom", label, 1, "private"))
+        if wants_work:
+            items.append(RoomProgramItem("work", "Góc làm việc", 1, "work_from_home"))
         if wants_storage:
             items.append(RoomProgramItem("storage", "Kho/lưu trữ", 1, "storage"))
         if understanding.room_program_hints.get("laundry"):
@@ -70,8 +84,12 @@ def plan_room_program(
         return ProgramPlan(items=tuple(items), selected_pattern=pattern, strategy_notes=notes, project_type=project_type)
 
     items: list[RoomProgramItem] = []
+    if wants_business:
+        items.append(RoomProgramItem("business", "Khu kinh doanh phía trước", 1, "front_service_concept"))
     if has_garage:
         items.append(RoomProgramItem("garage", "Chỗ đậu xe", 1, "user_fact"))
+    if wants_greenery and (concept_model.site.width_m.value >= 6.0 or concept_model.site.depth_m.value >= 22.0):
+        items.append(RoomProgramItem("garden", "Sân vườn đệm", 1, "green_buffer"))
     if understanding.family_lifestyle.get("has_elders") and floors >= 2 and bedrooms > 0:
         items.append(RoomProgramItem("bedroom", "Phòng ngủ ông bà", 1, "private_elder_access"))
         bedrooms -= 1
@@ -83,20 +101,39 @@ def plan_room_program(
             RoomProgramItem("wc", "Vệ sinh", 1, "support"),
         ]
     )
+    if wants_storage:
+        items.append(RoomProgramItem("storage", "Kho/lưu trữ tầng trệt", 1, "storage"))
 
     level_cycle = [floor for floor in range(2, floors + 1)] or [1]
+    bedroom_floors: set[int] = set()
     for index in range(bedrooms):
         floor = level_cycle[index % len(level_cycle)]
+        bedroom_floors.add(floor)
         label = "Phòng ngủ master" if index == 0 else f"Phòng ngủ {index + 1}"
         items.append(RoomProgramItem("bedroom", label, floor, "private"))
 
+    wc_floors = set(range(2, min(floors, bathrooms) + 1))
+    wc_floors.update(bedroom_floors)
+    for floor in sorted(wc_floors):
+        if floor <= floors:
+            items.append(RoomProgramItem("wc", f"Vệ sinh tầng {floor}", floor, "stacked_wet_core"))
+    assigned_bathrooms = 1 + len(wc_floors)
+    for index in range(max(0, bathrooms - assigned_bathrooms)):
+        floor = level_cycle[index % len(level_cycle)]
+        items.append(RoomProgramItem("wc", f"Vệ sinh phụ tầng {floor}", floor, "stacked_wet_core"))
+    if wants_work:
+        work_floor = 2 if floors >= 2 else 1
+        items.append(RoomProgramItem("work", "Góc làm việc", work_floor, "work_from_home"))
+    if wants_flexible:
+        flex_floor = 2 if floors >= 2 else 1
+        items.append(RoomProgramItem("flex", "Phòng linh hoạt", flex_floor, "flexible_guest_work"))
     if understanding.room_program_hints.get("prayer_room") or floors >= 3:
         items.append(RoomProgramItem("prayer", "Phòng thờ", floors, "family_culture"))
     if understanding.room_program_hints.get("laundry") or floors >= 3:
         items.append(RoomProgramItem("laundry", "Giặt phơi", floors, "support"))
     if style_id == "modern_tropical":
         items.append(RoomProgramItem("terrace_green", "Sân thượng xanh", floors, "greenery"))
-    elif wants_storage or "low_maintenance" in priorities:
+    if wants_storage or "low_maintenance" in priorities:
         items.append(RoomProgramItem("storage", "Kho/lưu trữ", floors, "low_maintenance"))
 
     notes = (

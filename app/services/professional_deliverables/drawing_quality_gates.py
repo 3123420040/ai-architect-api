@@ -126,6 +126,45 @@ def validate_pdf_page_render_nonblank(path: Path) -> GateResult:
     return GateResult("PDF_PAGE_RENDER_NONBLANK", "pass", "all PDF pages render with visible content")
 
 
+def validate_pdf_sheet_title_blocks(path: Path, sheets: tuple | list) -> GateResult:
+    missing: list[str] = []
+    with fitz.open(path) as doc:
+        if doc.page_count != len(sheets):
+            return GateResult("PDF_SHEET_TITLE_BLOCKS", "fail", f"PDF pages={doc.page_count}, sheets={len(sheets)}")
+        for index, sheet in enumerate(sheets):
+            text = doc[index].get_text("text")
+            number = getattr(sheet, "number", "")
+            title = getattr(sheet, "title", "")
+            if number not in text or title not in text:
+                missing.append(f"{number} {title}".strip())
+    if missing:
+        return GateResult("PDF_SHEET_TITLE_BLOCKS", "fail", "missing title block tokens: " + ", ".join(missing[:8]))
+    return GateResult("PDF_SHEET_TITLE_BLOCKS", "pass", f"{len(sheets)} sheets carry page title block tokens")
+
+
+def validate_pdf_concept_scope_text(path: Path) -> GateResult:
+    text = _pdf_text(path).lower()
+    unsafe_claims = (
+        "issued for construction",
+        "permit approved",
+        "permit drawings",
+        "structural design",
+        "mep design",
+        "code compliant",
+        "construction ready",
+        "bản vẽ thi công",
+        "hồ sơ xin phép",
+        "thiết kế kết cấu",
+        "thiết kế điện nước",
+    )
+    hits = [claim for claim in unsafe_claims if claim in text]
+    if hits:
+        return GateResult("PDF_CONCEPT_SCOPE_TEXT", "fail", "unsafe scope claims found: " + ", ".join(hits))
+    if "not for construction" not in text and "không dùng cho thi công" not in text:
+        return GateResult("PDF_CONCEPT_SCOPE_TEXT", "fail", "concept-only disclaimer missing")
+    return GateResult("PDF_CONCEPT_SCOPE_TEXT", "pass", "concept-only disclaimer present without readiness claims")
+
+
 def validate_pdf_elevation_layout(project: DrawingProject) -> GateResult:
     height = project.storeys * 3.3 + 0.8
     available_frame_width = (PAGE_SIZE[0] - 2 * 28.0 - 82) / 2
@@ -223,6 +262,38 @@ def validate_dxf_room_labels_openings(paths: Path | tuple[Path, ...] | list[Path
     if missing_rooms or not opening_entities:
         return GateResult("DXF_ROOM_LABELS_OPENINGS", "fail", f"missing_rooms={missing_rooms[:8]}, opening_entities={len(opening_entities)}")
     return GateResult("DXF_ROOM_LABELS_OPENINGS", "pass", f"{len(project.rooms)} room labels and {len(opening_entities)} opening entities present")
+
+
+def validate_dxf_sheet_title_blocks(paths: Path | tuple[Path, ...] | list[Path], sheets: tuple | list) -> GateResult:
+    all_paths = (paths,) if isinstance(paths, Path) else tuple(paths)
+    paths_by_name = {path.name: path for path in all_paths}
+    missing: list[str] = []
+    for sheet in sheets:
+        filename = getattr(sheet, "dxf_filename", None)
+        number = getattr(sheet, "number", "")
+        title = getattr(sheet, "title", "")
+        path = paths_by_name.get(filename) if filename else None
+        if path is None or not path.exists():
+            missing.append(number or str(filename))
+            continue
+        text = _dxf_text(ezdxf.readfile(path))
+        if number not in text or title not in text:
+            missing.append(f"{number} {title}".strip())
+    if missing:
+        return GateResult("DXF_SHEET_TITLE_BLOCKS", "fail", "missing title block tokens: " + ", ".join(missing[:8]))
+    return GateResult("DXF_SHEET_TITLE_BLOCKS", "pass", f"{len(sheets)} DXF sheets carry title block tokens")
+
+
+def validate_dxf_modelspace_nonempty(paths: Path | tuple[Path, ...] | list[Path]) -> GateResult:
+    all_paths = (paths,) if isinstance(paths, Path) else tuple(paths)
+    empty: list[str] = []
+    for path in all_paths:
+        doc = ezdxf.readfile(path)
+        if not list(doc.modelspace()):
+            empty.append(path.name)
+    if empty:
+        return GateResult("DXF_MODELSPACE_NONEMPTY", "fail", "empty modelspace sheets: " + ", ".join(empty[:8]))
+    return GateResult("DXF_MODELSPACE_NONEMPTY", "pass", f"{len(all_paths)} DXF sheets contain entities")
 
 
 def validate_dxf_no_stale_golden_labels(paths: Path | tuple[Path, ...] | list[Path], project: DrawingProject) -> GateResult:

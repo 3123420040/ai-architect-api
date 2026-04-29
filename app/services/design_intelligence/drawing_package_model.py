@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.services.design_intelligence.concept_model import ArchitecturalConceptModel
+from app.services.professional_deliverables.style_knowledge import StyleKnowledgeBase, StyleKnowledgeError
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class DrawingSheetModel:
     labels: tuple[str, ...] = field(default_factory=tuple)
     schedules: tuple[DrawingSchedule, ...] = field(default_factory=tuple)
     assumption_notes: tuple[str, ...] = field(default_factory=tuple)
+    style_notes: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,7 @@ def compile_drawing_package(concept_model: ArchitecturalConceptModel) -> Drawing
         for opening in concept_model.openings
     )
     assumption_notes = tuple(decision.customer_visible_explanation for decision in concept_model.assumptions)
+    style_notes = _style_notes(concept_model)
     room_labels = tuple(room.label_vi for room in concept_model.rooms)
     sheets: list[DrawingSheetModel] = [
         DrawingSheetModel(
@@ -82,6 +85,7 @@ def compile_drawing_package(concept_model: ArchitecturalConceptModel) -> Drawing
             kind="cover_index",
             labels=("Professional Concept 2D Package", concept_model.concept_status_note),
             assumption_notes=assumption_notes,
+            style_notes=style_notes,
         ),
         DrawingSheetModel(
             number="A-100",
@@ -90,6 +94,7 @@ def compile_drawing_package(concept_model: ArchitecturalConceptModel) -> Drawing
             dimensions=site_dimensions,
             labels=("Ranh đất",),
             assumption_notes=assumption_notes,
+            style_notes=style_notes,
         ),
     ]
     for level in concept_model.levels:
@@ -102,12 +107,13 @@ def compile_drawing_package(concept_model: ArchitecturalConceptModel) -> Drawing
                 dimensions=site_dimensions,
                 labels=tuple(room.label_vi for room in level_rooms),
                 assumption_notes=assumption_notes,
+                style_notes=style_notes,
             )
         )
     sheets.extend(
         [
-            DrawingSheetModel("A-201", "Mặt đứng concept", "elevations", labels=(str(concept_model.style.value) if concept_model.style else "style_pending",), assumption_notes=assumption_notes),
-            DrawingSheetModel("A-301", "Mặt cắt concept", "sections", labels=tuple(section.label for section in concept_model.section_lines), assumption_notes=assumption_notes),
+            DrawingSheetModel("A-201", "Mặt đứng concept", "elevations", labels=(str(concept_model.style.value) if concept_model.style else "style_pending",), assumption_notes=assumption_notes, style_notes=style_notes),
+            DrawingSheetModel("A-301", "Mặt cắt concept", "sections", labels=tuple(section.label for section in concept_model.section_lines), assumption_notes=assumption_notes, style_notes=style_notes),
             DrawingSheetModel(
                 "A-601",
                 "Bảng phòng và diện tích",
@@ -115,6 +121,7 @@ def compile_drawing_package(concept_model: ArchitecturalConceptModel) -> Drawing
                 labels=room_labels,
                 schedules=(DrawingSchedule("room_area", room_rows),),
                 assumption_notes=assumption_notes,
+                style_notes=style_notes,
             ),
             DrawingSheetModel(
                 "A-602",
@@ -123,14 +130,16 @@ def compile_drawing_package(concept_model: ArchitecturalConceptModel) -> Drawing
                 labels=tuple(row["opening_id"] for row in opening_rows),
                 schedules=(DrawingSchedule("door_window", opening_rows),),
                 assumption_notes=assumption_notes,
+                style_notes=style_notes,
             ),
             DrawingSheetModel(
                 "A-603",
                 "Giả định và ghi chú style",
                 "assumptions_style_notes",
-                labels=(str(concept_model.style.value) if concept_model.style else "style_pending",),
-                schedules=(),
+                labels=(str(concept_model.style.value) if concept_model.style else "style_pending", *style_notes[:3]),
+                schedules=(DrawingSchedule("assumptions", tuple({"note": note} for note in assumption_notes)),),
                 assumption_notes=assumption_notes,
+                style_notes=style_notes,
             ),
         ]
     )
@@ -140,5 +149,23 @@ def compile_drawing_package(concept_model: ArchitecturalConceptModel) -> Drawing
         sheets=tuple(sheets),
         line_weight_profile="AIA concept subset",
         layer_profile="AIA CAD layer subset",
-        qa_bounds={"lot_width_m": width, "lot_depth_m": depth, "floor_count": len(concept_model.levels)},
+        qa_bounds={
+            "lot_width_m": width,
+            "lot_depth_m": depth,
+            "floor_count": len(concept_model.levels),
+            "sheet_count": len(sheets),
+            "room_count": len(concept_model.rooms),
+            "opening_count": len(concept_model.openings),
+        },
     )
+
+
+def _style_notes(concept_model: ArchitecturalConceptModel) -> tuple[str, ...]:
+    style_id = str(concept_model.style.value) if concept_model.style else ""
+    if not style_id:
+        return ()
+    try:
+        profile = StyleKnowledgeBase.load_default().get(style_id)
+    except StyleKnowledgeError:
+        return ()
+    return tuple(profile.drawing_notes)

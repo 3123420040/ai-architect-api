@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from app.services.design_intelligence.concept_drawing_qa import concept_qa_passed, validate_drawing_package_model, validate_physical_sheet_presence
@@ -94,3 +95,61 @@ def test_e2e_revision_loop_regenerates_child_package(tmp_path: Path):
     assert child_render.drawing_project.lot_width_m == layout.site.width_m.value
     assert child_render.drawing_project.lot_depth_m == layout.site.depth_m.value
     assert concept_qa_passed(validate_physical_sheet_presence(child_render.drawing_package, child_render.bundle))
+
+
+def test_e2e_kitchen_storage_revision_writes_traceable_package_metadata(tmp_path: Path):
+    _understanding, _style, layout, _render, _package_gates = _run_concept_workflow(
+        "Nha pho 5x20m, 3 tang, 3 phong ngu, thich toi gian am, it bao tri va nhieu luu tru.",
+        tmp_path / "parent-kitchen-storage",
+    )
+    kitchen_before = next(room for room in layout.rooms if room.room_type == "kitchen_dining")
+    interpretation = parse_revision_feedback(
+        "Make the kitchen/dining larger, reduce the secondary bedroom if needed, and add more storage near the entry and bedrooms.",
+        layout,
+    )
+    revision = apply_revision_operations(layout, interpretation.operations, parent_version_id="parent-kitchen-v1")
+    child_render = render_concept_2d_package(
+        revision.child_model,
+        tmp_path / "child-kitchen-storage",
+        project_name="AI Concept E2E Kitchen Storage Revision",
+        require_dwg=False,
+    )
+    quality_report = json.loads(child_render.bundle.artifact_quality_report_json.read_text(encoding="utf-8"))
+    kitchen_after = next(room for room in revision.child_model.rooms if room.id == kitchen_before.id)
+
+    assert kitchen_after.area_m2.value > kitchen_before.area_m2.value
+    assert child_render.bundle.passed
+    assert quality_report["version_id"] == revision.child_version_id
+    assert quality_report["concept_package"]["revision"]["parent_version_id"] == "parent-kitchen-v1"
+    assert quality_report["concept_package"]["revision"]["child_version_id"] == revision.child_version_id
+    assert "room_priorities.storage" in quality_report["concept_package"]["revision"]["changed_fields"]
+    assert quality_report["concept_package"]["revision"]["construction_ready"] is False
+    assert concept_qa_passed(validate_physical_sheet_presence(child_render.drawing_package, child_render.bundle))
+
+
+def test_e2e_style_revision_preserves_geometry_and_updates_rendered_style(tmp_path: Path):
+    _understanding, _style, layout, _render, _package_gates = _run_concept_workflow(
+        "Nha pho 5x20m, 4 tang, 4 phong ngu, 4 wc, hien dai nhiet doi, thoang va nhieu cay.",
+        tmp_path / "parent-style",
+    )
+    interpretation = parse_revision_feedback(
+        "Change the style to minimal warm. Keep the same lot, number of floors, and room program. Make the facade calmer and warmer.",
+        layout,
+    )
+    revision = apply_revision_operations(layout, interpretation.operations, parent_version_id="parent-style-v1")
+    child_render = render_concept_2d_package(
+        revision.child_model,
+        tmp_path / "child-style",
+        project_name="AI Concept E2E Style Revision",
+        require_dwg=False,
+    )
+    quality_report = json.loads(child_render.bundle.artifact_quality_report_json.read_text(encoding="utf-8"))
+
+    assert revision.child_model.style.value == "minimal_warm"
+    assert child_render.drawing_project.lot_width_m == layout.site.width_m.value
+    assert child_render.drawing_project.lot_depth_m == layout.site.depth_m.value
+    assert child_render.drawing_project.storeys == len(layout.levels)
+    assert "Modern Minimalist" in child_render.drawing_project.style
+    assert quality_report["concept_package"]["revision"]["preserved"]["selected_or_inferred_style"] == "modern_tropical"
+    assert "style.selected_style_id" in quality_report["concept_package"]["revision"]["changed_fields"]
+    assert quality_report["concept_package"]["construction_ready"] is False

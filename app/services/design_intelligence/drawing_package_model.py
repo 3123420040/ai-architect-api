@@ -83,7 +83,8 @@ def compile_drawing_package(concept_model: ArchitecturalConceptModel) -> Drawing
         }
         for opening in concept_model.openings
     )
-    assumption_notes = tuple(decision.customer_visible_explanation for decision in concept_model.assumptions)
+    revision_notes = _revision_notes(concept_model)
+    assumption_notes = tuple(dict.fromkeys((*(decision.customer_visible_explanation for decision in concept_model.assumptions), *revision_notes)))
     style_notes = _style_notes(concept_model)
     room_labels = tuple(room.label_vi for room in concept_model.rooms)
     sheets: list[DrawingSheetModel] = [
@@ -164,6 +165,7 @@ def compile_drawing_package(concept_model: ArchitecturalConceptModel) -> Drawing
             "sheet_count": len(sheets),
             "room_count": len(concept_model.rooms),
             "opening_count": len(concept_model.openings),
+            "revision": _revision_package_metadata(concept_model),
         },
         style_provenance=_style_provenance(concept_model),
     )
@@ -217,6 +219,45 @@ def _metadata_style_notes(concept_model: ArchitecturalConceptModel) -> tuple[str
             if note:
                 notes.append(f"Nguồn reference_image_descriptor - {note}")
     return tuple(notes)
+
+
+def _revision_notes(concept_model: ArchitecturalConceptModel) -> tuple[str, ...]:
+    metadata = concept_model.metadata if isinstance(concept_model.metadata, dict) else {}
+    changelog = tuple(str(item) for item in metadata.get("customer_changelog") or () if str(item).strip())
+    summary = metadata.get("revision_summary") if isinstance(metadata.get("revision_summary"), dict) else {}
+    changed_fields = tuple(str(item) for item in summary.get("changed_fields") or () if str(item).strip())
+    notes = [f"Revision change: {item}" for item in changelog]
+    if changed_fields:
+        notes.append("Revision trace: changed fields - " + ", ".join(changed_fields[:8]))
+    if summary:
+        notes.append("Revision preservation: original lot geometry, floor count, required rooms, and concept-only status remain traceable unless explicitly changed.")
+    return tuple(dict.fromkeys(notes))
+
+
+def _revision_package_metadata(concept_model: ArchitecturalConceptModel) -> dict[str, Any] | None:
+    metadata = concept_model.metadata if isinstance(concept_model.metadata, dict) else {}
+    summary = metadata.get("revision_summary")
+    if not isinstance(summary, dict):
+        return None
+    preserved = summary.get("preserved") if isinstance(summary.get("preserved"), dict) else {}
+    return {
+        "parent_version_id": summary.get("parent_version_id"),
+        "child_version_id": summary.get("child_version_id"),
+        "operation_count": summary.get("operation_count"),
+        "changed_fields": tuple(summary.get("changed_fields") or ()),
+        "changelog": tuple(summary.get("changelog") or ()),
+        "requires_confirmation": bool(summary.get("requires_confirmation")),
+        "blockers": tuple(summary.get("blockers") or ()),
+        "preserved": {
+            "lot_width_m": preserved.get("lot_width_m"),
+            "lot_depth_m": preserved.get("lot_depth_m"),
+            "floor_count": preserved.get("floor_count"),
+            "room_count": preserved.get("room_count"),
+            "selected_or_inferred_style": preserved.get("selected_or_inferred_style"),
+            "concept_only_status": preserved.get("concept_only_status"),
+        },
+        "construction_ready": False,
+    }
 
 
 def _style_provenance(concept_model: ArchitecturalConceptModel) -> dict[str, Any]:

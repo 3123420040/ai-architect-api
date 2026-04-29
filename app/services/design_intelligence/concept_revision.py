@@ -7,6 +7,7 @@ from app.services.design_intelligence.concept_model import ArchitecturalConceptM
 from app.services.design_intelligence.layout_generator import validate_layout
 from app.services.design_intelligence.provenance import DecisionValue
 from app.services.design_intelligence.revision_interpreter import RevisionOperation
+from app.services.professional_deliverables.style_knowledge import normalize_signal
 
 
 @dataclass(frozen=True)
@@ -28,17 +29,51 @@ def apply_revision_operations(
 ) -> ConceptRevisionResult:
     rooms = list(concept_model.rooms)
     changelog: list[str] = []
+    assumptions = list(concept_model.assumptions)
     metadata = dict(concept_model.metadata)
     metadata["parent_version_id"] = parent_version_id
-    metadata["revision_operations"] = [operation.__dict__ for operation in operations]
+    metadata["revision_operations"] = [_operation_dict(operation) for operation in operations]
+    metadata["preserved_requirements"] = _preserved_requirements(concept_model)
 
     for operation in operations:
-        if operation.type == "resize_room" and operation.target_id:
+        if operation.type in {"resize_room", "resize_room_intent"} and operation.target_id:
             rooms, message = _resize_room(rooms, operation.target_id, float(operation.parameters.get("delta_m") or 0.5), operation)
             changelog.append(message)
-        elif operation.type == "switch_kitchen_open_closed":
-            metadata["kitchen_open"] = bool(operation.parameters.get("open"))
+        elif operation.type in {"switch_kitchen_open_closed", "adjust_room_priority"}:
+            _append_metadata(metadata, "room_priority_adjustments", _operation_dict(operation))
+            if "open_kitchen" in operation.parameters:
+                metadata["kitchen_open"] = bool(operation.parameters.get("open_kitchen"))
+            elif "open" in operation.parameters:
+                metadata["kitchen_open"] = bool(operation.parameters.get("open"))
             changelog.append(operation.customer_visible_explanation)
+        elif operation.type == "move_room_preference":
+            _append_metadata(metadata, "room_move_preferences", _operation_dict(operation))
+            changelog.append(operation.customer_visible_explanation)
+        elif operation.type == "add_or_strengthen_style_feature":
+            _append_metadata(metadata, "style_feature_adjustments", _operation_dict(operation))
+            feature = operation.parameters.get("feature")
+            if feature in {"greenery", "more_greenery"}:
+                metadata["greenery_adjustment"] = operation.parameters.get("level", "more")
+            if feature == "lightwell":
+                metadata["lightwell_adjustment"] = operation.parameters.get("level", "more_visible")
+            changelog.append(operation.customer_visible_explanation)
+        elif operation.type == "suppress_style_feature":
+            _append_metadata(metadata, "suppressed_style_features", _operation_dict(operation))
+            if operation.parameters.get("feature") == "glass":
+                metadata["facade_glass_policy"] = "reduce_large_unshaded_glass"
+            changelog.append(operation.customer_visible_explanation)
+        elif operation.type == "add_assumption":
+            assumptions.append(_revision_assumption(operation))
+            _append_metadata(metadata, "revision_assumptions", _operation_dict(operation))
+            changelog.append(operation.customer_visible_explanation)
+        elif operation.type == "ask_clarifying_question":
+            _append_metadata(metadata, "revision_clarifications", _operation_dict(operation))
+            blockers = operation.parameters.get("blocked_scopes")
+            if blockers:
+                metadata["revision_blockers"] = tuple(blockers)
+            changelog.append(operation.customer_visible_explanation)
+        elif operation.type == "preserve_existing_requirement":
+            metadata["preserved_requirements"] = _preserved_requirements(concept_model)
         elif operation.type == "adjust_greenery":
             metadata["greenery_adjustment"] = operation.parameters.get("level", "more")
             changelog.append(operation.customer_visible_explanation)
@@ -55,7 +90,7 @@ def apply_revision_operations(
     child_version_id = f"concept-{uuid4().hex[:12]}"
     metadata["child_version_id"] = child_version_id
     metadata["customer_changelog"] = changelog
-    child = replace(concept_model, rooms=tuple(rooms), metadata=metadata)
+    child = replace(concept_model, rooms=tuple(rooms), assumptions=tuple(assumptions), metadata=metadata)
     validate_layout(child)
     return ConceptRevisionResult(
         parent_version_id=parent_version_id,
@@ -64,11 +99,7 @@ def apply_revision_operations(
         child_model=child,
         operations=operations,
         changelog=tuple(changelog),
-        preserved_parent_evidence={
-            "source_brief": concept_model.source_brief,
-            "assumptions": [assumption.as_dict() for assumption in concept_model.assumptions],
-            "style": concept_model.style.as_dict() if concept_model.style else None,
-        },
+        preserved_parent_evidence=_preserved_requirements(concept_model),
     )
 
 
@@ -130,3 +161,68 @@ def _bounds(points: tuple[tuple[float, float], ...]) -> tuple[float, float, floa
     xs = [point[0] for point in points]
     ys = [point[1] for point in points]
     return min(xs), min(ys), max(xs), max(ys)
+
+
+def _operation_dict(operation: RevisionOperation) -> dict:
+    if hasattr(operation, "as_dict"):
+        return operation.as_dict()
+    return operation.__dict__
+
+
+def _append_metadata(metadata: dict, key: str, value: dict) -> None:
+    current = list(metadata.get(key) or [])
+    current.append(value)
+    metadata[key] = current
+
+
+def _revision_assumption(operation: RevisionOperation) -> DecisionValue:
+    return DecisionValue(
+        value=operation.parameters,
+        source="ai_proposal",
+        confidence=operation.confidence,
+        assumption=True,
+        customer_visible_explanation=operation.customer_visible_explanation,
+        needs_confirmation=operation.requires_confirmation,
+    )
+
+
+def _preserved_requirements(concept_model: ArchitecturalConceptModel) -> dict:
+    return {
+        "source_brief": concept_model.source_brief,
+        "concept_status_note": concept_model.concept_status_note,
+        "project_type": _project_type(concept_model),
+        "lot_dimensions": {
+            "width_m": concept_model.site.width_m.as_dict(),
+            "depth_m": concept_model.site.depth_m.as_dict(),
+            "area_m2": concept_model.site.area_m2.as_dict(),
+        },
+        "family_lifestyle": dict(concept_model.metadata.get("family_lifestyle") or {}),
+        "room_program_hints": dict(concept_model.metadata.get("room_program_hints") or {}),
+        "required_rooms": [
+            {
+                "id": room.id,
+                "level_id": room.level_id,
+                "room_type": room.room_type,
+                "label_vi": room.label_vi,
+                "priority": room.priority.as_dict(),
+            }
+            for room in concept_model.rooms
+        ],
+        "style": concept_model.style.as_dict() if concept_model.style else None,
+        "selected_or_inferred_style": concept_model.style.value if concept_model.style else None,
+        "assumptions": [assumption.as_dict() for assumption in concept_model.assumptions],
+    }
+
+
+def _project_type(concept_model: ArchitecturalConceptModel) -> str | None:
+    metadata_type = concept_model.metadata.get("project_type")
+    if metadata_type:
+        return str(metadata_type)
+    brief = normalize_signal(concept_model.source_brief)
+    if any(keyword in brief for keyword in ("can ho", "chung cu", "apartment", "flat", "studio")):
+        return "apartment_renovation"
+    if any(keyword in brief for keyword in ("nha pho", "nha ong", "townhouse")):
+        return "townhouse"
+    if any(keyword in brief for keyword in ("biet thu", "villa")):
+        return "villa"
+    return "townhouse" if float(concept_model.site.width_m.value) <= 8.0 else "villa"

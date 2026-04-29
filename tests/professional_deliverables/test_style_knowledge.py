@@ -32,12 +32,16 @@ def test_initial_profiles_include_required_rule_groups(style_id: str):
     assert profile.spatial_rules["primary_strategy"]
     assert profile.room_defaults
     assert profile.opening_rules["window_to_wall_ratio"]
+    assert profile.default_rules["homeowner_question_policy"]
+    assert profile.facade_intent
     assert profile.facade_rules["massing"]
     assert profile.material_palette["base"]
     assert profile.drawing_rules["plan_notes"]
+    assert profile.drawing_notes
     assert profile.avoid_rules
     assert profile.validation_rules
     assert profile.customer_explanation()
+    assert "technical dimensions" in profile.default_rules["homeowner_question_policy"]
 
 
 def test_pattern_memory_retrieves_7x25_modern_tropical_townhouse():
@@ -84,12 +88,41 @@ def test_style_profile_rejects_unsafe_scope_claims():
         "spatial_rules": {"primary_strategy": "x"},
         "room_defaults": {"living": {}},
         "opening_rules": {"window_to_wall_ratio": "moderate"},
+        "default_rules": {"homeowner_question_policy": "x"},
+        "facade_intent": "x",
         "facade_rules": {"massing": "x"},
         "material_palette": {"base": ["x"]},
         "drawing_rules": {"plan_notes": ["x"]},
+        "drawing_notes": ["x"],
         "avoid_rules": ["x"],
         "validation_rules": ["issued " + "for construction"],
         "explanation_templates": {"style_summary": "x"},
+    }
+
+    with pytest.raises(StyleKnowledgeError):
+        StyleProfile.from_dict(payload)
+
+
+def test_style_profile_rejects_professional_scope_claims_in_any_field():
+    payload = {
+        "style_id": "bad_scope",
+        "display_name": "Bad Scope",
+        "version": "test",
+        "aliases": ["bad"],
+        "customer_language_signals": ["bad"],
+        "visual_signals": ["bad"],
+        "spatial_rules": {"primary_strategy": "x"},
+        "room_defaults": {"living": {}},
+        "opening_rules": {"window_to_wall_ratio": "moderate"},
+        "default_rules": {"homeowner_question_policy": "x"},
+        "facade_intent": "x",
+        "facade_rules": {"massing": "x"},
+        "material_palette": {"base": ["x"]},
+        "drawing_rules": {"plan_notes": ["x"]},
+        "drawing_notes": ["x"],
+        "avoid_rules": ["x"],
+        "validation_rules": ["x"],
+        "explanation_templates": {"style_summary": "This produces permit drawings and code compliance."},
     }
 
     with pytest.raises(StyleKnowledgeError):

@@ -2,27 +2,48 @@
   "style_id": "indochine_soft",
   "display_name": "Indochine mềm",
   "version": "2026.04",
-  "aliases": ["indochine soft", "soft indochine", "indochine nhẹ", "đông dương nhẹ", "dong duong nhe"],
-  "customer_language_signals": ["indochine", "đông dương", "ấm sang", "cổ điển nhẹ", "mây tre", "gạch bông", "vòm nhẹ", "truyền thống nhưng nhẹ"],
-  "visual_signals": ["arched opening", "rattan", "pattern tile", "dark wood accent", "cream wall", "decorative screen", "colonial shutters"],
+  "aliases": ["indochine soft", "soft indochine", "indochine nhẹ", "đông dương nhẹ", "dong duong nhe", "Á Đông nhẹ", "a dong nhe"],
+  "customer_language_signals": ["indochine", "đông dương", "ấm sang", "cổ điển nhẹ", "mây tre", "gạch bông", "vòm nhẹ", "truyền thống nhưng nhẹ", "gỗ tối", "màu kem", "hoài cổ nhẹ", "chất á đông"],
+  "visual_signals": ["arched opening", "rattan", "pattern tile", "dark wood accent", "cream wall", "decorative screen", "colonial shutters", "brass accent", "timber panel", "encaustic tile"],
   "spatial_rules": {
     "primary_strategy": "calm symmetrical moments in key rooms with practical modern circulation",
     "ventilation": "use shutters, high openings, and shaded balconies conceptually",
     "green_zones": ["balcony planter", "entry planter", "small courtyard when available"],
-    "privacy": "soft screen layers and recessed openings"
+    "privacy": "soft screen layers and recessed openings",
+    "lot_fit": "fits apartments and townhouses when the heritage-inspired moments stay light and do not crowd circulation",
+    "section_idea": "show feature arch/screen zones only where they explain a real room relationship"
   },
   "room_defaults": {
     "living": {"feature_wall_or_arch": true, "loose_furniture_group": true},
     "kitchen_dining": {"can_be_semi_open": true, "warm_material_focus": true},
     "bedroom": {"calm_symmetry": true, "accent_headboard": true},
-    "prayer_room": {"quiet_upper_floor_position": true}
+    "prayer_room": {"quiet_upper_floor_position": true},
+    "apartment_living": {"preserve_open_living_dining": true, "feature_screen_optional": true},
+    "bathroom": {"avoid_unverified_wet_area_moves": true},
+    "storage": {"prefer_crafted_cabinet_wall": true}
   },
   "opening_rules": {
     "window_to_wall_ratio": "moderate_with_shutters_or_screens",
     "door_style": "timber tone with simple panel rhythm",
     "window_style": "rectangular or softly arched concept openings with shutters/screens",
+    "default_opening_strategy": "use rhythmic, shaded openings and keep arches/screens as selective concept accents",
     "avoid": "heavy ornate detailing at concept scale"
   },
+  "default_rules": {
+    "source": "style_profile",
+    "exterior_wall_thickness_m": 0.2,
+    "interior_wall_thickness_m": 0.12,
+    "main_door_width_m": 1.2,
+    "internal_door_width_m": 0.9,
+    "window_width_m": 1.2,
+    "window_height_m": 1.2,
+    "window_sill_height_m": 0.9,
+    "stair_width_m": 1.05,
+    "floor_to_floor_height_m": 3.3,
+    "lightwell_min_width_m": 1.0,
+    "homeowner_question_policy": "do not ask for technical dimensions by default; expose them as style assumptions"
+  },
+  "facade_intent": "Warm, crafted, restrained facade or interior frontage with soft rhythm, cream base tones, and selective timber/rattan-inspired accents.",
   "facade_rules": {
     "massing": "simple volume with soft rhythm and shaded balcony",
     "screening": "rattan/wood-inspired screen zones used sparingly",
@@ -40,6 +61,7 @@
     "elevation_notes": ["show shutters/screens and balcony rhythm", "label material concept without detailed fabrication"],
     "line_emphasis": "feature openings and screen zones should be legible but not overdrawn"
   },
+  "drawing_notes": ["Use feature arch/screen labels sparingly and only where tied to a room.", "For apartments, note fixed wet/core assumptions instead of moving them silently.", "Keep decorative motifs simplified at concept scale."],
   "avoid_rules": ["overly ornate facade", "copying heritage motifs without simplifying", "dark enclosed rooms", "moving apartment wet areas without verified constraints"],
   "validation_rules": ["heritage-inspired notes must remain concept-level", "apartment renovation should preserve fixed shafts unless verified otherwise", "assumptions must stay concept-only"],
   "explanation_templates": {

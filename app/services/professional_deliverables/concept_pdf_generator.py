@@ -8,6 +8,7 @@ from app.services.design_intelligence.concept_model import ArchitecturalConceptM
 from app.services.design_intelligence.drawing_package_model import DrawingPackageModel, compile_drawing_package
 from app.services.professional_deliverables.demo import Sprint1BundleResult, generate_project_2d_bundle
 from app.services.professional_deliverables.drawing_contract import DrawingProject, Fixture, Opening, Room, SheetSpec, WallSegment
+from app.services.professional_deliverables.style_knowledge import StyleKnowledgeBase, StyleKnowledgeError
 
 
 @dataclass(frozen=True)
@@ -95,11 +96,7 @@ def concept_model_to_drawing_project(concept_model: ArchitecturalConceptModel, *
         concept_note="Bản vẽ khái niệm - không dùng cho thi công",
         brief_summary=concept_model.source_brief,
         level_metadata=tuple(level.__dict__ for level in concept_model.levels),
-        style_metadata={
-            "style_id": concept_model.style.value if concept_model.style else None,
-            "facade_strategy": concept_model.facade.strategy.value if concept_model.facade else None,
-            "assumptions": tuple(assumption.customer_visible_explanation for assumption in concept_model.assumptions),
-        },
+        style_metadata=_style_metadata(concept_model),
     )
 
 
@@ -124,6 +121,31 @@ def _concept_sheet_specs(package: DrawingPackageModel) -> tuple[SheetSpec, ...]:
         elif sheet.kind == "assumptions_style_notes":
             sheets.append(SheetSpec(sheet.number, sheet.title, "A-603-assumptions-style-notes", "assumptions_style_notes", scale=sheet.scale))
     return tuple(sheets)
+
+
+def _style_metadata(concept_model: ArchitecturalConceptModel) -> dict:
+    style_id = str(concept_model.style.value) if concept_model.style else None
+    metadata = {
+        "style_id": style_id,
+        "facade_strategy": concept_model.facade.strategy.value if concept_model.facade else None,
+        "assumptions": tuple(assumption.customer_visible_explanation for assumption in concept_model.assumptions),
+        "drawing_notes": (),
+        "material_palette": {},
+    }
+    if not style_id:
+        return metadata
+    try:
+        profile = StyleKnowledgeBase.load_default().get(style_id)
+    except StyleKnowledgeError:
+        return metadata
+    return {
+        **metadata,
+        "style_display_name": profile.display_name,
+        "facade_intent": profile.facade_intent,
+        "drawing_notes": profile.drawing_notes,
+        "material_palette": profile.material_palette,
+        "drawing_rules": profile.drawing_rules,
+    }
 
 
 def _to_drawing_opening(opening, wall_lookup: dict[str, ConceptWall]) -> Opening:

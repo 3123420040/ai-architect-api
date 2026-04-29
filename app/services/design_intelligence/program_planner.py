@@ -21,6 +21,7 @@ class ProgramPlan:
     items: tuple[RoomProgramItem, ...]
     selected_pattern: ProjectPattern | None
     strategy_notes: tuple[str, ...]
+    project_type: str | None = None
 
 
 def plan_room_program(
@@ -42,13 +43,38 @@ def plan_room_program(
     }
     patterns = (pattern_memory or PatternMemory()).retrieve(facts, style_id=style_id, limit=1)
     pattern = patterns[0] if patterns else None
+    project_type = understanding.site_facts.get("project_type")
     floors = len(concept_model.levels)
     bedrooms = int(understanding.room_program_hints.get("bedrooms") or (2 if floors <= 2 else 3))
     has_garage = bool(understanding.room_program_hints.get("garage"))
+    priorities = set(understanding.family_lifestyle.get("priorities", []) or [])
+    wants_storage = bool(understanding.room_program_hints.get("storage") or "storage" in priorities)
+
+    if project_type == "apartment_renovation":
+        items: list[RoomProgramItem] = [
+            RoomProgramItem("living", "Phòng khách", 1, "core_public"),
+            RoomProgramItem("kitchen_dining", "Bếp và ăn", 1, "core_public"),
+            RoomProgramItem("wc", "Vệ sinh", 1, "support"),
+        ]
+        for index in range(bedrooms):
+            label = "Phòng ngủ master" if index == 0 else f"Phòng ngủ {index + 1}"
+            items.append(RoomProgramItem("bedroom", label, 1, "private"))
+        if wants_storage:
+            items.append(RoomProgramItem("storage", "Kho/lưu trữ", 1, "storage"))
+        if understanding.room_program_hints.get("laundry"):
+            items.append(RoomProgramItem("laundry", "Giặt phơi", 1, "support"))
+        notes = (
+            pattern.stair_lightwell_position if pattern else "Use apartment renovation mode; no townhouse stair concept.",
+            pattern.facade_strategy if pattern else "Interior concept follows selected style profile; external facade unchanged unless allowed.",
+        )
+        return ProgramPlan(items=tuple(items), selected_pattern=pattern, strategy_notes=notes, project_type=project_type)
 
     items: list[RoomProgramItem] = []
     if has_garage:
         items.append(RoomProgramItem("garage", "Chỗ đậu xe", 1, "user_fact"))
+    if understanding.family_lifestyle.get("has_elders") and floors >= 2 and bedrooms > 0:
+        items.append(RoomProgramItem("bedroom", "Phòng ngủ ông bà", 1, "private_elder_access"))
+        bedrooms -= 1
     items.extend(
         [
             RoomProgramItem("living", "Phòng khách", 1, "core_public"),
@@ -70,11 +96,11 @@ def plan_room_program(
         items.append(RoomProgramItem("laundry", "Giặt phơi", floors, "support"))
     if style_id == "modern_tropical":
         items.append(RoomProgramItem("terrace_green", "Sân thượng xanh", floors, "greenery"))
-    elif understanding.family_lifestyle.get("priorities") and "low_maintenance" in understanding.family_lifestyle["priorities"]:
+    elif wants_storage or "low_maintenance" in priorities:
         items.append(RoomProgramItem("storage", "Kho/lưu trữ", floors, "low_maintenance"))
 
     notes = (
         pattern.stair_lightwell_position if pattern else "Use compact central stair/lightwell concept.",
         pattern.facade_strategy if pattern else "Facade strategy will follow selected style profile.",
     )
-    return ProgramPlan(items=tuple(items), selected_pattern=pattern, strategy_notes=notes)
+    return ProgramPlan(items=tuple(items), selected_pattern=pattern, strategy_notes=notes, project_type=project_type)

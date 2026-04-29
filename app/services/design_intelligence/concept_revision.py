@@ -10,6 +10,9 @@ from app.services.design_intelligence.revision_interpreter import RevisionOperat
 from app.services.professional_deliverables.style_knowledge import normalize_signal
 
 
+PROTECTED_RESIZE_ROOM_TYPES = {"stair_lightwell", "wc", "garage", "business"}
+
+
 @dataclass(frozen=True)
 class ConceptRevisionResult:
     parent_version_id: str
@@ -118,20 +121,36 @@ def _resize_room(
         key=lambda item: _bounds(item[1].polygon.value)[1],
     )
     position = next(index for index, item in enumerate(same_level) if item[1].id == target_id)
-    if position >= len(same_level) - 1:
-        return rooms, "Phòng đang ở cuối chuỗi nên chưa nới tự động để tránh vượt ranh đất."
-    next_index, next_room = same_level[position + 1]
     t_min_x, t_min_y, t_max_x, t_max_y = _bounds(target.polygon.value)
-    n_min_x, n_min_y, n_max_x, n_max_y = _bounds(next_room.polygon.value)
-    safe_delta = min(delta_m, max(0.0, (n_max_y - n_min_y) - 1.2))
-    if safe_delta <= 0:
-        return rooms, "Phòng kế tiếp không còn đủ chiều sâu để nới tự động."
 
-    target_polygon = ((t_min_x, t_min_y), (t_max_x, t_min_y), (t_max_x, t_max_y + safe_delta), (t_min_x, t_max_y + safe_delta))
-    next_polygon = ((n_min_x, n_min_y + safe_delta), (n_max_x, n_min_y + safe_delta), (n_max_x, n_max_y), (n_min_x, n_max_y))
-    rooms[target_index] = _replace_room_geometry(target, target_polygon, operation.customer_visible_explanation)
-    rooms[next_index] = _replace_room_geometry(next_room, next_polygon, "Cân lại phòng kế tiếp để nhường diện tích trong concept.")
-    return rooms, operation.customer_visible_explanation
+    if position < len(same_level) - 1:
+        next_index, next_room = same_level[position + 1]
+        if next_room.room_type not in PROTECTED_RESIZE_ROOM_TYPES:
+            n_min_x, n_min_y, n_max_x, n_max_y = _bounds(next_room.polygon.value)
+            safe_delta = min(delta_m, max(0.0, (n_max_y - n_min_y) - 1.2))
+            if safe_delta <= 0:
+                return rooms, "Phòng kế tiếp không còn đủ chiều sâu để nới tự động."
+
+            target_polygon = ((t_min_x, t_min_y), (t_max_x, t_min_y), (t_max_x, t_max_y + safe_delta), (t_min_x, t_max_y + safe_delta))
+            next_polygon = ((n_min_x, n_min_y + safe_delta), (n_max_x, n_min_y + safe_delta), (n_max_x, n_max_y), (n_min_x, n_max_y))
+            rooms[target_index] = _replace_room_geometry(target, target_polygon, operation.customer_visible_explanation)
+            rooms[next_index] = _replace_room_geometry(next_room, next_polygon, "Cân lại phòng kế tiếp để nhường diện tích trong concept.")
+            return rooms, operation.customer_visible_explanation
+
+    if position > 0:
+        previous_index, previous_room = same_level[position - 1]
+        if previous_room.room_type not in PROTECTED_RESIZE_ROOM_TYPES:
+            p_min_x, p_min_y, p_max_x, p_max_y = _bounds(previous_room.polygon.value)
+            safe_delta = min(delta_m, max(0.0, (p_max_y - p_min_y) - 1.6))
+            if safe_delta <= 0:
+                return rooms, "Phòng liền trước không còn đủ chiều sâu để nới tự động."
+            target_polygon = ((t_min_x, t_min_y - safe_delta), (t_max_x, t_min_y - safe_delta), (t_max_x, t_max_y), (t_min_x, t_max_y))
+            previous_polygon = ((p_min_x, p_min_y), (p_max_x, p_min_y), (p_max_x, p_max_y - safe_delta), (p_min_x, p_max_y - safe_delta))
+            rooms[target_index] = _replace_room_geometry(target, target_polygon, operation.customer_visible_explanation)
+            rooms[previous_index] = _replace_room_geometry(previous_room, previous_polygon, "Cân lại phòng liền trước để giữ nguyên lõi thang/WC.")
+            return rooms, operation.customer_visible_explanation
+
+    return rooms, "Phòng đang kẹp bởi lõi/garage/khu kinh doanh nên chưa nới tự động để tránh phá vỡ concept."
 
 
 def _replace_room_geometry(room: ConceptRoom, polygon: tuple[tuple[float, float], ...], explanation: str) -> ConceptRoom:

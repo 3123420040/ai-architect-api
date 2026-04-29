@@ -198,6 +198,8 @@ def _extract_site_facts(normalized: str) -> dict[str, Any]:
 
 def _extract_room_program(normalized: str) -> dict[str, Any]:
     program: dict[str, Any] = {}
+    if "studio" in normalized:
+        program["studio"] = True
     floors_match = re.search(r"(\d+)\s*(?:tang|lau|floor)", normalized)
     if floors_match:
         program["floors"] = int(floors_match.group(1))
@@ -218,6 +220,10 @@ def _extract_room_program(normalized: str) -> dict[str, Any]:
         program["laundry"] = True
     if any(keyword in normalized for keyword in ("phong lam viec", "home office", "lam viec tai nha")):
         program["home_office"] = True
+    if any(keyword in normalized for keyword in ("shophouse", "kinh doanh", "mat bang", "cua hang", "home business")):
+        program["business_front"] = True
+    if any(keyword in normalized for keyword in ("linh hoat", "da nang", "flexible", "guest/work", "khach lam viec")):
+        program["flexible_space"] = True
     if any(keyword in normalized for keyword in ("san vuon", "vuon", "nhieu cay", "greenery")):
         program["greenery"] = True
     if any(keyword in normalized for keyword in ("luu tru", "kho", "tu do", "storage")):
@@ -238,6 +244,7 @@ def _extract_room_program(normalized: str) -> dict[str, Any]:
             "storage": ("luu tru", "kho", "tu do", "storage"),
             "home_office": ("phong lam viec", "home office", "lam viec tai nha"),
             "laundry": ("phong giat", "giat phoi", "laundry"),
+            "business_front": ("shophouse", "kinh doanh", "mat bang", "cua hang", "home business"),
         },
     )
     if must_haves:
@@ -280,6 +287,8 @@ def _extract_family_lifestyle(normalized: str) -> dict[str, Any]:
         priorities.append("privacy")
     if any(keyword in normalized for keyword in ("nhieu luu tru", "luu tru", "kho", "tu do")):
         priorities.append("storage")
+    if any(keyword in normalized for keyword in ("bep mo", "open kitchen", "sinh hoat chung", "tiep khach", "social living")):
+        priorities.append("open_social")
     if any(keyword in normalized for keyword in ("nhieu cay", "xanh", "vuon", "greenery")):
         priorities.append("greenery")
     if any(keyword in normalized for keyword in ("am sang", "sang trong", "cao cap", "premium")):
@@ -331,11 +340,17 @@ def _assumptions(site_facts: dict[str, Any], room_program: dict[str, Any], refer
         if site_facts.get("project_type") == "apartment_renovation":
             assumptions.append("Assume one concept level for apartment renovation unless the homeowner says otherwise.")
         else:
-            assumptions.append("Assume two concept floors until floor count is confirmed.")
+            assumptions.append("Assume concept floor count from typology and lot proportions until the homeowner confirms.")
     if "bedrooms" not in room_program:
         assumptions.append("Assume room counts can be drafted from family size and confirmed later.")
+    if room_program.get("studio"):
+        assumptions.append("Treat studio planning as flexible living/sleeping zones, not separate enclosed bedrooms.")
     if "garage" in room_program:
         assumptions.append("Resolve parking as a concept front-yard/garage zone, not a vehicle engineering layout.")
+    if room_program.get("business_front"):
+        assumptions.append("Treat front business/service area as concept zoning only, not legal or licensing guidance.")
+    if room_program.get("home_office"):
+        assumptions.append("Place work-from-home as a concept zone until acoustic and privacy needs are confirmed.")
     if reference_images:
         assumptions.append("Treat reference images as structured descriptors only; no real image analysis is performed yet.")
     return tuple(assumptions)

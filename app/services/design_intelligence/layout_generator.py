@@ -56,6 +56,8 @@ def validate_layout(model: ArchitecturalConceptModel) -> None:
     _validate_openings_attach_to_walls(model)
     _validate_stairs_fit(model)
     _validate_fixtures_fit(model)
+    _validate_room_area_plausibility(model)
+    _validate_wet_core_alignment(model)
 
 
 def _generate_rooms(program: ProgramPlan, *, width: float, depth: float, floors: int) -> tuple[ConceptRoom, ...]:
@@ -81,12 +83,12 @@ def _generate_rooms(program: ProgramPlan, *, width: float, depth: float, floors:
 
 
 def _floor_one_sequence(items: list[RoomProgramItem]) -> list[RoomProgramItem]:
-    priority = ("garage", "living", "bedroom", "stair_lightwell", "kitchen_dining", "wc", "storage")
+    priority = ("business", "garage", "garden", "living", "bedroom", "stair_lightwell", "kitchen_dining", "wc", "storage")
     return sorted(items, key=lambda item: priority.index(item.room_type) if item.room_type in priority else len(priority))
 
 
 def _upper_floor_sequence(items: list[RoomProgramItem]) -> list[RoomProgramItem]:
-    priority = ("bedroom", "stair_lightwell", "prayer", "laundry", "terrace_green", "storage")
+    priority = ("bedroom", "work", "flex", "stair_lightwell", "wc", "prayer", "laundry", "terrace_green", "storage")
     if not any(item.room_type == "stair_lightwell" for item in items):
         floor = items[0].level_number if items else 2
         items = [*items, RoomProgramItem("stair_lightwell", "Thang + giếng trời", floor, "circulation_green_core")]
@@ -94,30 +96,67 @@ def _upper_floor_sequence(items: list[RoomProgramItem]) -> list[RoomProgramItem]
 
 
 def _apartment_sequence(items: list[RoomProgramItem]) -> list[RoomProgramItem]:
-    priority = ("living", "kitchen_dining", "wc", "bedroom", "storage", "laundry")
+    priority = ("living", "flex_sleep", "kitchen_dining", "work", "storage", "laundry", "wc", "bedroom")
     return sorted(items, key=lambda item: priority.index(item.room_type) if item.room_type in priority else len(priority))
 
 
 def _partition_apartment_rooms(items: list[RoomProgramItem], *, width: float, depth: float, floor: int) -> list[ConceptRoom]:
     margin = 0.3
     min_x, min_y, max_x, max_y = margin, margin, width - margin, depth - margin
-    mid_x = min(max(min_x + 3.2, width * 0.58), max_x - 2.1)
-    public_y2 = min(max_y - 4.0, min_y + max(3.5, depth * 0.38))
-    service_y2 = min(max_y - 3.0, public_y2 + max(1.7, depth * 0.17))
     bedrooms = [item for item in items if item.room_type == "bedroom"]
     living = _first_item(items, "living", floor=floor)
     kitchen = _first_item(items, "kitchen_dining", floor=floor)
     wc = _first_item(items, "wc", floor=floor)
     storage = _find_item(items, "storage")
     laundry = _find_item(items, "laundry")
+    work = _find_item(items, "work")
+    flex_sleep = _find_item(items, "flex_sleep")
 
     room_specs: list[tuple[RoomProgramItem, tuple[Point, ...], tuple[str, ...], str]] = []
+    if flex_sleep is not None and not bedrooms:
+        public_y2 = min(max_y - 3.6, min_y + max(2.4, depth * 0.34))
+        sleep_y1 = public_y2 + 0.15
+        sleep_y2 = min(max_y - 2.0, sleep_y1 + max(1.6, depth * 0.22))
+        service_y1 = sleep_y2 + 0.15
+        service_split_x = min(max_x - 1.7, min_x + (max_x - min_x) * 0.62)
+        room_specs.append((living, _rect(min_x, min_y, max_x, public_y2), (), "studio giữ vùng sinh hoạt mở, không giả định phòng khách tách kín"))
+        room_specs.append((flex_sleep, _rect(min_x, sleep_y1, max_x, sleep_y2), ("living",), "khu ngủ linh hoạt là zone concept trong studio, cần xác nhận đồ nội thất gập/mở"))
+        kitchen_x1 = min_x
+        if storage is not None and service_split_x - min_x >= 2.4:
+            storage_x2 = min(service_split_x - 1.2, min_x + 1.3)
+            room_specs.append((storage, _rect(min_x, service_y1, storage_x2, max_y), ("living", "flex_sleep"), "lưu trữ studio đặt thành dải tủ gần vùng bếp"))
+            kitchen_x1 = storage_x2 + 0.1
+        room_specs.append((kitchen, _rect(kitchen_x1, service_y1, service_split_x, max_y), ("living",), "bếp studio giữ dạng tuyến gọn trong lõi dịch vụ"))
+        room_specs.append((wc, _rect(service_split_x + 0.1, service_y1, max_x, max_y), ("kitchen_dining",), "WC studio gom vào lõi phụ để giữ vùng ở linh hoạt"))
+        return _build_rooms_from_specs(room_specs, floor=floor)
+
+    mid_x = min(max(min_x + 3.2, width * 0.58), max_x - 2.35)
+    public_y2 = min(max_y - 4.0, min_y + max(3.5, depth * 0.38))
+    service_depth = max(2.05 if (storage is not None or work is not None) else 1.7, depth * 0.17)
+    service_y2 = min(max_y - 3.0, public_y2 + service_depth)
     room_specs.append((living, _rect(min_x, min_y, mid_x, public_y2), (), "vùng sinh hoạt gần cửa vào và ánh sáng chính của căn hộ"))
     room_specs.append((kitchen, _rect(mid_x, min_y, max_x, public_y2), ("living",), "bếp/ăn đặt cạnh phòng khách để giữ trục sinh hoạt mở"))
 
     service_split_x = min(max_x - 1.9, min_x + (max_x - min_x) * 0.58)
-    if storage is not None:
+    service_items = [item for item in (storage, work, laundry) if item is not None]
+    if len(service_items) >= 2:
+        cursor_x = min_x
+        available = max(service_split_x - min_x, 1.8)
+        for index, item in enumerate(service_items):
+            remaining = len(service_items) - index
+            segment_width = available / remaining
+            next_x = service_split_x if remaining == 1 else min(service_split_x - 0.1, cursor_x + max(1.35, segment_width * 0.75))
+            explanation = {
+                "storage": "mảng lưu trữ đặt gần lối vào/khu bếp theo brief",
+                "work": "góc làm việc đặt trong dải đệm, tách tương đối khỏi vùng ngủ",
+                "laundry": "giặt phơi concept gom vào lõi dịch vụ căn hộ",
+            }.get(item.room_type, "zone phụ căn hộ đặt trong dải dịch vụ")
+            room_specs.append((item, _rect(cursor_x, public_y2, next_x, service_y2), ("living", "kitchen_dining"), explanation))
+            cursor_x = next_x + 0.1
+    elif storage is not None:
         room_specs.append((storage, _rect(min_x, public_y2, service_split_x, service_y2), ("living", "kitchen_dining"), "mảng lưu trữ đặt gần lối vào/khu bếp theo brief"))
+    elif work is not None:
+        room_specs.append((work, _rect(min_x, public_y2, service_split_x, service_y2), ("living",), "góc làm việc đặt gần vùng sinh hoạt nhưng tách khỏi phòng ngủ"))
     elif laundry is not None:
         room_specs.append((laundry, _rect(min_x, public_y2, service_split_x, service_y2), ("kitchen_dining",), "giặt phơi concept gom vào lõi dịch vụ căn hộ"))
     room_specs.append((wc, _rect(service_split_x, public_y2, max_x, service_y2), ("kitchen_dining",), "WC giữ trong lõi phụ của căn hộ ở mức concept"))
@@ -152,7 +191,9 @@ def _partition_townhouse_ground_floor(items: list[RoomProgramItem], *, width: fl
     side_gap = 0.2
     left_x2 = max(min_x + 2.4, core_x1 - side_gap)
 
+    business = _find_item(items, "business")
     garage = _find_item(items, "garage")
+    garden = _find_item(items, "garden")
     living = _first_item(items, "living", floor=floor)
     stair = _first_item(items, "stair_lightwell", floor=floor)
     kitchen = _first_item(items, "kitchen_dining", floor=floor)
@@ -162,12 +203,22 @@ def _partition_townhouse_ground_floor(items: list[RoomProgramItem], *, width: fl
 
     y = min_y
     room_specs: list[tuple[RoomProgramItem, tuple[Point, ...], tuple[str, ...], str]] = []
+    if business is not None:
+        business_depth = min(max(3.8, depth * 0.17), 5.2, max_y - y)
+        room_specs.append((business, _rect(min_x, y, max_x, y + business_depth), (), "khu kinh doanh/service đặt sát mặt tiền và cần xác nhận vận hành riêng"))
+        y += business_depth
+
     if garage is not None:
         garage_depth = min(max(4.8, depth * 0.2), 5.6, max_y - y)
         room_specs.append((garage, _rect(min_x, y, max_x, y + garage_depth), (), "khoảng đậu xe đặt sát mặt tiền để tách xe khỏi không gian ở"))
         y += garage_depth
 
-    living_depth = min(max(4.4, depth * 0.21), 5.8, max_y - y)
+    if garden is not None:
+        garden_depth = min(max(1.6, depth * 0.08), 2.4, max_y - y)
+        room_specs.append((garden, _rect(min_x, y, max_x, y + garden_depth), _adjacency_names(room_specs, "garage", "business"), "sân vườn đệm là khoảng xanh concept giữa mặt tiền/xe và vùng ở"))
+        y += garden_depth
+
+    living_depth = min(max(4.2, depth * 0.2), 5.6, max_y - y)
     room_specs.append((living, _rect(min_x, y, max_x, y + living_depth), _adjacency_names(room_specs, "garage"), "phòng khách nối trực tiếp lối vào và làm vùng đệm sinh hoạt"))
     y += living_depth
 
@@ -180,15 +231,17 @@ def _partition_townhouse_ground_floor(items: list[RoomProgramItem], *, width: fl
         room_specs.append((stair, _rect(core_x1, y, core_x2, core_y2), ("living",), "lõi thang và giếng trời đặt bên hông giữa nhà để nhà hẹp vẫn có lối đi"))
     y = core_y2
 
-    rear_service_depth = 2.0 if wc is not None or storage is not None else 0.0
-    kitchen_y2 = max(y + 3.8, max_y - rear_service_depth)
+    rear_service_depth = 2.1 if wc is not None or storage is not None else 0.0
+    kitchen_depth = min(max(3.8, depth * 0.22), 5.8, max_y - y - rear_service_depth)
+    kitchen_y2 = y + max(3.2, kitchen_depth)
     kitchen_y2 = min(kitchen_y2, max_y)
     room_specs.append((kitchen, _rect(min_x, y, max_x, kitchen_y2), ("stair_lightwell", "living"), "bếp và ăn đặt phía sau lõi thang để liên thông sân sau/khu phụ"))
     y = kitchen_y2
 
-    if wc is not None and y < max_y - 0.8:
-        service_y2 = max_y
-        room_specs.append((wc, _rect(core_x1, y, core_x2, service_y2), ("kitchen_dining", "stair_lightwell"), "WC gom về dải phụ sau nhà, không chiếm toàn bộ bề ngang"))
+    if (wc is not None or storage is not None) and y < max_y - 0.8:
+        service_y2 = min(max_y, y + 2.4)
+        if wc is not None:
+            room_specs.append((wc, _rect(core_x1, y, core_x2, service_y2), ("kitchen_dining", "stair_lightwell"), "WC gom về dải phụ sau nhà, không chiếm toàn bộ bề ngang"))
         if storage is not None and left_x2 > min_x + 1.2:
             room_specs.append((storage, _rect(min_x, y, left_x2, service_y2), ("kitchen_dining",), "kho/lưu trữ tầng trệt tận dụng dải sau bếp"))
 
@@ -202,6 +255,11 @@ def _partition_townhouse_upper_floor(items: list[RoomProgramItem], *, width: flo
     core_x1, core_x2 = _side_core_bounds(width)
     bedrooms = [item for item in items if item.room_type == "bedroom"]
     stair = _first_item(items, "stair_lightwell", floor=floor)
+    wcs = [item for item in items if item.room_type == "wc"]
+    wc = wcs[0] if wcs else None
+    extra_wcs = wcs[1:]
+    work = _find_item(items, "work")
+    flex = _find_item(items, "flex")
     prayer = _find_item(items, "prayer")
     laundry = _find_item(items, "laundry")
     terrace = _find_item(items, "terrace_green")
@@ -216,10 +274,39 @@ def _partition_townhouse_upper_floor(items: list[RoomProgramItem], *, width: flo
         front_depth = min(max(4.0, depth * 0.18), 5.0)
         room_specs.append((bedrooms[0], _rect(min_x, min_y, max_x, min(min_y + front_depth, core_y1 - 0.2)), (), "phòng ngủ trước lấy sáng mặt tiền nhưng giữ chiều sâu vừa phải"))
 
+    previous_y2 = _bounds(room_specs[-1][1])[3] if room_specs else min_y
+    has_pre_core_slot = not room_specs or not bedrooms or core_y1 - previous_y2 >= 2.0
+    if work is not None and has_pre_core_slot:
+        work_y1 = _bounds(room_specs[-1][1])[3] + 0.2 if room_specs else min_y
+        work_y2 = min(core_y1 - 0.2, work_y1 + 2.2)
+        if work_y2 - work_y1 >= 1.6:
+            room_specs.append((work, _rect(min_x, work_y1, max_x, work_y2), _adjacency_names(room_specs, "bedroom"), "góc làm việc đặt giữa vùng ngủ và lõi thang để giảm nhiễu từ không gian chung"))
+
+    previous_y2 = _bounds(room_specs[-1][1])[3] if room_specs else min_y
+    has_pre_core_slot = not room_specs or not bedrooms or core_y1 - previous_y2 >= 2.0
+    if flex is not None and work is None and has_pre_core_slot:
+        flex_y1 = _bounds(room_specs[-1][1])[3] + 0.2 if room_specs else min_y
+        flex_y2 = min(core_y1 - 0.2, flex_y1 + 2.2)
+        if flex_y2 - flex_y1 >= 1.6:
+            room_specs.append((flex, _rect(min_x, flex_y1, max_x, flex_y2), _adjacency_names(room_specs, "bedroom"), "phòng linh hoạt giữ như zone guest/work concept cần xác nhận"))
+
     room_specs.append((stair, _rect(core_x1, core_y1, core_x2, core_y2), _adjacency_names(room_specs, "bedroom"), "lõi thang/giếng trời xếp chồng qua các tầng để thông gió và định hướng lưu thông"))
 
     y = core_y2 + 0.25
-    for bedroom in bedrooms[1:]:
+    remaining_bedrooms = list(bedrooms[1:])
+    if wc is not None and y < max_y - 1.6:
+        wc_depth = min(2.35, max_y - y)
+        room_specs.append((wc, _rect(core_x1, y, core_x2, y + wc_depth), ("stair_lightwell",), "WC tầng trên xếp trong cùng dải lõi ướt với WC tầng trệt"))
+        side_bedroom_x2 = core_x1 - 0.2
+        if remaining_bedrooms and side_bedroom_x2 - min_x >= 2.25:
+            bedroom = remaining_bedrooms.pop(0)
+            bedroom_depth = min(max(3.8, depth * 0.17), 4.8, max_y - y)
+            room_specs.append((bedroom, _rect(min_x, y, side_bedroom_x2, y + bedroom_depth), ("stair_lightwell", "wc"), "phòng ngủ sau né lõi WC để giữ stacking ướt rõ ràng"))
+            y += bedroom_depth + 0.25
+        else:
+            y += wc_depth + 0.25
+
+    for bedroom in remaining_bedrooms:
         bedroom_depth = min(max(3.8, depth * 0.17), 4.8, max_y - y)
         room_specs.append((bedroom, _rect(min_x, y, max_x, y + bedroom_depth), ("stair_lightwell",), "phòng ngủ sau tiếp cận từ lõi thang và tách khỏi mặt tiền"))
         y += bedroom_depth + 0.25
@@ -230,6 +317,9 @@ def _partition_townhouse_upper_floor(items: list[RoomProgramItem], *, width: flo
         y += prayer_depth + 0.2
 
     support_y1 = max(y, max_y - 2.3)
+    for extra_wc in extra_wcs:
+        if support_y1 < max_y - 0.8:
+            room_specs.append((extra_wc, _rect(core_x1, support_y1, core_x2, max_y), ("stair_lightwell",), "WC phụ tầng trên vẫn giữ trong cùng dải lõi ướt"))
     if laundry is not None and support_y1 < max_y - 0.8:
         room_specs.append((laundry, _rect(core_x1, support_y1, core_x2, max_y), ("stair_lightwell", "kitchen_dining"), "giặt phơi gom ở dải phụ phía sau/tầng trên"))
     if storage is not None and support_y1 < max_y - 0.8:
@@ -289,6 +379,11 @@ def _first_item(items: list[RoomProgramItem], room_type: str, *, floor: int) -> 
         "storage": "Kho/lưu trữ",
         "laundry": "Giặt phơi",
         "prayer": "Phòng thờ",
+        "business": "Khu kinh doanh phía trước",
+        "garden": "Sân vườn đệm",
+        "work": "Góc làm việc",
+        "flex": "Phòng linh hoạt",
+        "flex_sleep": "Khu ngủ linh hoạt",
     }
     return RoomProgramItem(room_type, labels.get(room_type, room_type), floor, "assumed_support")
 
@@ -404,16 +499,23 @@ def _generate_openings(
         if front in wall_ids:
             if floor == 1:
                 has_garage = any(room.level_id == level_id and room.room_type == "garage" for room in rooms)
+                has_business = any(room.level_id == level_id and room.room_type == "business" for room in rooms)
+                if has_garage:
+                    door_width = _proposal(min(2.8, max(2.4, width * 0.38)), "Cửa vào/xe concept lấy theo bề ngang mặt tiền và cần xác nhận chi tiết.")
+                elif has_business:
+                    door_width = _proposal(min(2.2, max(1.4, width * 0.32)), "Cửa khu kinh doanh concept giữ bề rộng vừa phải và cần xác nhận vận hành.")
+                else:
+                    door_width = defaults.main_door_width_m
                 openings.append(
                     ConceptOpening(
                         id=f"d-{level_id}-main",
                         level_id=level_id,
                         wall_id=front,
                         opening_type="door",
-                        width_m=_proposal(min(2.8, max(2.4, width * 0.38)), "Cửa vào/xe concept lấy theo bề ngang mặt tiền và cần xác nhận chi tiết.") if has_garage else defaults.main_door_width_m,
+                        width_m=door_width,
                         height_m=_proposal(2.4, "Chiều cao cửa chính concept lấy theo mặc định."),
                         sill_height_m=None,
-                        operation=_proposal("sliding_or_swing" if has_garage else "swing", "Kiểu mở cửa concept là giả định sơ bộ cho mặt tiền."),
+                        operation=_proposal("sliding_or_swing" if has_garage or has_business else "swing", "Kiểu mở cửa concept là giả định sơ bộ cho mặt tiền."),
                     )
                 )
             else:
@@ -461,26 +563,36 @@ def _generate_openings(
 def _generate_fixtures(rooms: tuple[ConceptRoom, ...]) -> tuple[ConceptFixture, ...]:
     fixtures: list[ConceptFixture] = []
     for room in rooms:
+        room_width, room_depth = _room_extent(room.polygon.value)
         if room.room_type == "garage":
-            fixture_type, label, size = "car", "Xe ô tô", (2.0, 4.2)
+            fixture_type, label, size = "car", "Xe ô tô", (min(2.0, room_width - 0.5), min(4.2, room_depth - 0.5))
+        elif room.room_type == "business":
+            fixture_type, label, size = "service_counter", "Quầy dịch vụ", (min(2.2, room_width - 0.5), 0.65)
+        elif room.room_type == "garden":
+            fixture_type, label, size = "plant", "Mảng xanh", (min(1.2, room_width - 0.4), min(1.2, room_depth - 0.4))
         elif room.room_type == "living":
-            fixture_type, label, size = "sofa", "Sofa", (2.2, 0.9)
+            fixture_type, label, size = "sofa", "Sofa", (min(2.2, room_width - 0.5), 0.9)
+        elif room.room_type == "flex_sleep":
+            fixture_type, label, size = "convertible_bed", "Sofa giường", (min(2.0, room_width - 0.5), min(1.4, room_depth - 0.4))
+        elif room.room_type in {"work", "flex"}:
+            fixture_type, label, size = "desk", "Bàn làm việc", (min(1.4, room_width - 0.4), 0.7)
         elif room.room_type == "kitchen_dining":
-            fixture_type, label, size = "kitchen_counter", "Bếp", (2.4, 0.65)
+            fixture_type, label, size = "kitchen_counter", "Bếp", (min(2.4, room_width - 0.45), 0.65)
         elif room.room_type == "bedroom":
-            fixture_type, label, size = "bed", "Giường", (2.0, 1.8)
+            fixture_type, label, size = "bed", "Giường", (min(2.0, room_width - 0.45), min(1.8, room_depth - 0.45))
         elif room.room_type == "wc":
-            fixture_type, label, size = "toilet", "Thiết bị WC", (0.8, 1.4)
+            fixture_type, label, size = "toilet", "Thiết bị WC", (min(0.8, room_width - 0.3), min(1.4, room_depth - 0.3))
         elif room.room_type in {"terrace_green", "stair_lightwell"}:
-            fixture_type, label, size = "plant", "Cây xanh", (1.0, 1.0)
+            fixture_type, label, size = "plant", "Cây xanh", (min(1.0, room_width - 0.4), min(1.0, room_depth - 0.4))
         elif room.room_type == "storage":
-            fixture_type, label, size = "cabinet", "Tủ lưu trữ", (1.6, 0.6)
+            fixture_type, label, size = "cabinet", "Tủ lưu trữ", (min(1.6, room_width - 0.35), 0.6)
         elif room.room_type == "laundry":
-            fixture_type, label, size = "washer", "Máy giặt", (0.7, 0.7)
+            fixture_type, label, size = "washer", "Máy giặt", (min(0.7, room_width - 0.3), min(0.7, room_depth - 0.3))
         elif room.room_type == "prayer":
-            fixture_type, label, size = "altar", "Bàn thờ", (1.4, 0.6)
+            fixture_type, label, size = "altar", "Bàn thờ", (min(1.4, room_width - 0.4), 0.6)
         else:
             continue
+        size = (round(max(0.45, size[0]), 3), round(max(0.45, size[1]), 3))
         center = _fixture_center(room.polygon.value, room.room_type, size)
         fixtures.append(
             ConceptFixture(
@@ -570,6 +682,50 @@ def _validate_fixtures_fit(model: ArchitecturalConceptModel) -> None:
             raise LayoutValidationError(f"Fixture {fixture.id} does not fit room depth")
 
 
+def _validate_room_area_plausibility(model: ArchitecturalConceptModel) -> None:
+    min_area = {
+        "wc": 2.0,
+        "storage": 1.2,
+        "laundry": 1.4,
+        "stair_lightwell": 3.0,
+        "kitchen_dining": 2.4,
+        "work": 2.0,
+        "flex_sleep": 4.0,
+    }
+    max_area = {
+        "bedroom": 32.0,
+        "kitchen_dining": 36.0,
+        "wc": 8.0,
+        "storage": 10.0,
+        "laundry": 8.0,
+        "stair_lightwell": 10.0,
+        "garage": 38.0,
+        "business": 35.0,
+    }
+    for room in model.rooms:
+        area = float(room.area_m2.value)
+        lower = min_area.get(room.room_type)
+        upper = max_area.get(room.room_type)
+        if lower is not None and area < lower:
+            raise LayoutValidationError(f"Room {room.id} is too small for concept review")
+        if upper is not None and area > upper:
+            raise LayoutValidationError(f"Room {room.id} is too large for plausible concept review")
+
+
+def _validate_wet_core_alignment(model: ArchitecturalConceptModel) -> None:
+    wc_rooms = sorted((room for room in model.rooms if room.room_type == "wc"), key=lambda room: room.level_id)
+    if len(wc_rooms) <= 1:
+        return
+    base = next((room for room in wc_rooms if room.level_id == "L1"), wc_rooms[0])
+    base_x1, _, base_x2, _ = _bounds(base.polygon.value)
+    for room in wc_rooms:
+        if room.id == base.id:
+            continue
+        x1, _, x2, _ = _bounds(room.polygon.value)
+        if min(base_x2, x2) - max(base_x1, x1) < 0.45:
+            raise LayoutValidationError(f"Room {room.id} is not aligned with the wet core")
+
+
 def _generate_section_lines(*, width: float, depth: float, stairs: tuple[ConceptStair, ...]) -> tuple[ConceptSectionLine, ...]:
     if stairs:
         min_x, _, max_x, _ = _bounds(stairs[0].footprint.value)
@@ -645,8 +801,14 @@ def _fixture_center(points: tuple[Point, ...], room_type: str, size: tuple[float
     half_y = size[1] / 2
     if room_type == "garage":
         raw = ((min_x + max_x) / 2, min_y + half_y + 0.45)
+    elif room_type == "business":
+        raw = (min_x + half_x + 0.45, min_y + half_y + 0.45)
+    elif room_type == "garden":
+        raw = ((min_x + max_x) / 2, (min_y + max_y) / 2)
     elif room_type == "living":
         raw = (min_x + half_x + 0.45, min_y + half_y + 0.55)
+    elif room_type in {"flex_sleep", "work", "flex"}:
+        raw = (min_x + half_x + 0.35, min_y + half_y + 0.35)
     elif room_type == "kitchen_dining":
         raw = (max_x - half_x - 0.35, max_y - half_y - 0.35)
     elif room_type == "bedroom":
@@ -689,6 +851,11 @@ def _bounds(points: tuple[Point, ...]) -> tuple[float, float, float, float]:
 def _rect_area(points: tuple[Point, ...]) -> float:
     min_x, min_y, max_x, max_y = _bounds(points)
     return max(0.0, (max_x - min_x) * (max_y - min_y))
+
+
+def _room_extent(points: tuple[Point, ...]) -> tuple[float, float]:
+    min_x, min_y, max_x, max_y = _bounds(points)
+    return max_x - min_x, max_y - min_y
 
 
 def _rectangles_overlap(first: tuple[Point, ...], second: tuple[Point, ...]) -> bool:

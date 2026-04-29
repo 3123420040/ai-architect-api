@@ -63,6 +63,19 @@ def test_missing_critical_site_data_blocks_concept_seed():
         seed_concept_model(project_id="missing-site", understanding=understanding, style_inference=infer_style(understanding))
 
 
+def test_low_communication_townhouse_defaults_are_visible_assumptions():
+    understanding = parse_customer_understanding(
+        "Need a 5x20 family house, simple, bright, enough bedrooms, not too expensive."
+    )
+    model = seed_concept_model(project_id="low-comm", understanding=understanding, style_inference=infer_style(understanding))
+
+    assert len(model.levels) == 3
+    floor_assumption = next(assumption for assumption in model.assumptions if "Assume 3 concept floors" in assumption.value)
+    assert floor_assumption.assumption is True
+    assert floor_assumption.needs_confirmation is True
+    assert floor_assumption.source == "rule_default"
+
+
 def test_assumed_site_boundary_requires_visible_assumption():
     understanding = parse_customer_understanding("Nha 5x20m, 3 tang, thich toi gian am.")
     model = seed_concept_model(project_id="assumption-test", understanding=understanding, style_inference=infer_style(understanding))

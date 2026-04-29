@@ -99,6 +99,10 @@ def serialize_bundle(bundle: ProfessionalDeliverableBundle) -> dict[str, Any]:
     latest_job = max(bundle.jobs, key=lambda item: item.created_at, default=None)
     assets = list(bundle.assets)
     retryable = bool(latest_job and latest_job.status == "failed")
+    concept_package = (bundle.runtime_metadata_json or {}).get("concept_2d")
+    technical_details = dict(bundle.technical_details_json or {})
+    if concept_package is not None:
+        technical_details.setdefault("concept_package", concept_package)
     return {
         "bundle_id": bundle.id,
         "version_id": bundle.version_id,
@@ -111,7 +115,8 @@ def serialize_bundle(bundle: ProfessionalDeliverableBundle) -> dict[str, Any]:
         "missing_artifacts": bundle.missing_artifacts_json or [],
         "retryable": retryable,
         "user_message": bundle.user_message,
-        "technical_details": bundle.technical_details_json or {},
+        "technical_details": technical_details,
+        "concept_package": concept_package,
         "assets": [
             {
                 "url": resolve_browser_asset_url(asset.public_url) or asset.public_url,

@@ -290,6 +290,7 @@ class ProfessionalDeliverableBundleOut(BaseModel):
     retryable: bool = False
     user_message: str | None = None
     technical_details: dict = Field(default_factory=dict)
+    concept_package: dict | None = None
     assets: list[ProfessionalDeliverableAssetSummary] = Field(default_factory=list)
     current_job: ProfessionalDeliverableJobOut | None = None
     updated_at: datetime

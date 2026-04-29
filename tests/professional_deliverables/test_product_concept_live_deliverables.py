@@ -9,6 +9,7 @@ from app.db import SessionLocal
 from app.models import DesignVersion, ProfessionalDeliverableBundle, ProfessionalDeliverableJob
 from app.services.design_intelligence.product_concept_adapter import ProductConceptAdapterBlocker, ProductConceptAdapterResult
 from app.services.geometry import build_geometry_v2
+from app.services.professional_deliverables.orchestrator import serialize_bundle
 from app.services.professional_deliverables.validators import GateResult
 from tests.test_flows import complete_brief_payload, create_project, register
 
@@ -122,6 +123,9 @@ def test_live_concept_2d_route_uses_full_sheet_specs_and_registers_metadata(clie
         dxf_assets = [asset for asset in bundle.assets if asset.asset_role == "dxf"]
         assert any(asset.metadata_json.get("sheet_number") == "A-601" for asset in dxf_assets)
         assert all({"sheet_number", "sheet_title", "sheet_kind", "readiness", "state", "source_path", "public_url"} <= set(asset.metadata_json) for asset in dxf_assets)
+        payload = serialize_bundle(bundle)
+        assert payload["concept_package"]["enabled"] is True
+        assert payload["technical_details"]["concept_package"]["sheet_count"] > 7
 
 
 def test_live_concept_2d_fallback_is_explicit_for_adapter_unsupported(client, session_payload, monkeypatch, tmp_path):
@@ -166,3 +170,6 @@ def test_live_concept_2d_fallback_is_explicit_for_adapter_unsupported(client, se
         pdf_asset = next(asset for asset in bundle.assets if asset.asset_role == "pdf")
         assert pdf_asset.metadata_json["concept_package"] is False
         assert pdf_asset.metadata_json["fallback_reason"] == "Concept adapter unsupported_fixture_contract"
+        payload = serialize_bundle(bundle)
+        assert payload["concept_package"]["readiness"] == "fallback"
+        assert payload["technical_details"]["concept_package"]["fallback_reason"] == "Concept adapter unsupported_fixture_contract"

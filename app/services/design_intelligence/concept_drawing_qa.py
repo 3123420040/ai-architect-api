@@ -122,7 +122,7 @@ def _has_sheet_kinds(package: DrawingPackageModel, expected: set[str]) -> bool:
 def _sheet_identifiers_are_unique(package: DrawingPackageModel) -> bool:
     numbers = [sheet.number.strip() for sheet in package.sheets]
     titles = [sheet.title.strip() for sheet in package.sheets]
-    return all(numbers) and all(titles) and len(numbers) == len(set(numbers))
+    return all(numbers) and all(titles) and len(numbers) == len(set(numbers)) and len(titles) == len(set(titles))
 
 
 def _dimensions_match_site(package: DrawingPackageModel, concept_model: ArchitecturalConceptModel) -> bool:

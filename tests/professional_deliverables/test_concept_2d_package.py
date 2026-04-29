@@ -149,3 +149,17 @@ def test_concept_render_qa_catches_missing_artifacts_and_titles(tmp_path: Path):
     missing_title_gates = validate_physical_sheet_presence(broken_package, result.bundle)
     assert any(gate.code == "CONCEPT_PDF_SHEET_TITLES" and gate.status == "fail" for gate in missing_title_gates)
     assert any(gate.code == "CONCEPT_PDF_TITLE_BLOCKS" and gate.status == "fail" for gate in missing_title_gates)
+
+
+def test_concept_package_qa_catches_duplicate_sheet_titles(tmp_path: Path):
+    concept = _concept_layout()
+    result = render_concept_2d_package(concept, tmp_path, project_name="Nhà phố concept", require_dwg=False)
+    first_sheet, second_sheet, *remaining = result.drawing_package.sheets
+    broken_package = replace(
+        result.drawing_package,
+        sheets=(first_sheet, replace(second_sheet, title=first_sheet.title), *remaining),
+    )
+
+    gates = validate_drawing_package_model(broken_package, concept)
+
+    assert any(gate.code == "CONCEPT_SHEET_IDENTIFIERS" and gate.status == "fail" for gate in gates)

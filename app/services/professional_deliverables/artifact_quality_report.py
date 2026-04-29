@@ -64,11 +64,15 @@ def build_2d_artifact_readiness(
     statuses = _status_by_gate(list(gate_results))
     pdf_gate_names = (
         "PDF_PAGE_COUNT",
+        "PDF_SHEET_TITLE_BLOCKS",
+        "PDF_CONCEPT_SCOPE_TEXT",
         "PDF_DYNAMIC_DIMENSIONS",
         "PDF_SITE_BOUNDARY_MATCH",
         "PDF_FLOOR_COUNT",
         "PDF_ROOM_LABELS_AREAS",
         "PDF_DIMENSION_CHAINS",
+        "PDF_PLAN_VIEWPORT_USAGE",
+        "PDF_ROOM_LABEL_NON_OVERLAP",
         "PDF_ROOM_DIMENSION_LABELS",
         "PDF_NO_RAW_INTERNAL_STRINGS",
         "PDF_SECTION_HEIGHT_LABELS",
@@ -80,6 +84,9 @@ def build_2d_artifact_readiness(
         "PDF_NO_STALE_GOLDEN_LABELS",
     )
     dxf_gate_names = (
+        "DXF_SHEET_PARITY",
+        "DXF_MODELSPACE_NONEMPTY",
+        "DXF_SHEET_TITLE_BLOCKS",
         "DXF_OPENABLE",
         "DXF_UNITS_METERS",
         "DXF_REQUIRED_LAYERS",
@@ -87,12 +94,15 @@ def build_2d_artifact_readiness(
         "DXF_DIMENSIONS_MATCH",
         "DXF_ROOM_DIMENSIONS",
         "DXF_ROOM_LABELS_OPENINGS",
+        "DXF_ENTITY_RICHNESS",
         "DXF_NO_RAW_INTERNAL_STRINGS",
         "DXF_NO_STALE_GOLDEN_LABELS",
     )
 
     pdf_technical_gates = (
         "PDF_PAGE_COUNT",
+        "PDF_SHEET_TITLE_BLOCKS",
+        "PDF_CONCEPT_SCOPE_TEXT",
         "PDF_DYNAMIC_DIMENSIONS",
         "PDF_SITE_BOUNDARY_MATCH",
         "PDF_FLOOR_COUNT",
@@ -101,6 +111,8 @@ def build_2d_artifact_readiness(
         "PDF_NO_STALE_GOLDEN_LABELS",
     )
     pdf_market_gates = (
+        "PDF_PLAN_VIEWPORT_USAGE",
+        "PDF_ROOM_LABEL_NON_OVERLAP",
         "PDF_ROOM_DIMENSION_LABELS",
         "PDF_NO_RAW_INTERNAL_STRINGS",
         "PDF_SECTION_HEIGHT_LABELS",
@@ -111,6 +123,9 @@ def build_2d_artifact_readiness(
         "PDF_ELEVATION_VISUAL_DENSITY",
     )
     dxf_technical_gates = (
+        "DXF_SHEET_PARITY",
+        "DXF_MODELSPACE_NONEMPTY",
+        "DXF_SHEET_TITLE_BLOCKS",
         "DXF_OPENABLE",
         "DXF_UNITS_METERS",
         "DXF_REQUIRED_LAYERS",
@@ -119,7 +134,7 @@ def build_2d_artifact_readiness(
         "DXF_ROOM_LABELS_OPENINGS",
         "DXF_NO_STALE_GOLDEN_LABELS",
     )
-    dxf_market_gates = ("DXF_ROOM_DIMENSIONS", "DXF_NO_RAW_INTERNAL_STRINGS")
+    dxf_market_gates = ("DXF_ROOM_DIMENSIONS", "DXF_ENTITY_RICHNESS", "DXF_NO_RAW_INTERNAL_STRINGS")
 
     pdf_technical_ready = pdf_path.exists() and all(statuses.get(name) == "pass" for name in pdf_technical_gates if name in statuses)
     pdf_market_ready = pdf_technical_ready and all(statuses.get(name) == "pass" for name in pdf_market_gates if name in statuses)
@@ -140,7 +155,7 @@ def build_2d_artifact_readiness(
             exists=pdf_path.exists(),
             format_valid=statuses.get("PDF_PAGE_COUNT") == "pass",
             semantic_valid=all(statuses.get(name) == "pass" for name in ("PDF_DYNAMIC_DIMENSIONS", "PDF_SITE_BOUNDARY_MATCH", "PDF_ROOM_LABELS_AREAS", "PDF_DIMENSION_CHAINS", "PDF_ROOM_DIMENSION_LABELS", "PDF_NO_RAW_INTERNAL_STRINGS", "PDF_NO_STALE_GOLDEN_LABELS") if name in statuses),
-            visual_qa=all(statuses.get(name) == "pass" for name in ("PDF_NO_TITLE_OVERLAP", "PDF_PAGE_RENDER_NONBLANK", "PDF_ELEVATION_LAYOUT", "PDF_ELEVATION_VISUAL_DENSITY") if name in statuses),
+            visual_qa=all(statuses.get(name) == "pass" for name in ("PDF_PLAN_VIEWPORT_USAGE", "PDF_ROOM_LABEL_NON_OVERLAP", "PDF_NO_TITLE_OVERLAP", "PDF_PAGE_RENDER_NONBLANK", "PDF_ELEVATION_LAYOUT", "PDF_ELEVATION_VISUAL_DENSITY") if name in statuses),
             customer_ready=pdf_market_ready,
             technical_ready=pdf_technical_ready,
             concept_review_ready=pdf_technical_ready,
@@ -155,7 +170,7 @@ def build_2d_artifact_readiness(
             state=dxf_state,
             exists=bool(dxf_paths) and all(path.exists() for path in dxf_paths),
             format_valid=statuses.get("DXF_OPENABLE") == "pass" and statuses.get("DXF_UNITS_METERS") == "pass",
-            semantic_valid=all(statuses.get(name) == "pass" for name in ("DXF_PROJECT_EXTENTS_MATCH", "DXF_DIMENSIONS_MATCH", "DXF_ROOM_DIMENSIONS", "DXF_ROOM_LABELS_OPENINGS", "DXF_NO_RAW_INTERNAL_STRINGS", "DXF_NO_STALE_GOLDEN_LABELS") if name in statuses),
+            semantic_valid=all(statuses.get(name) == "pass" for name in ("DXF_PROJECT_EXTENTS_MATCH", "DXF_DIMENSIONS_MATCH", "DXF_ROOM_DIMENSIONS", "DXF_ROOM_LABELS_OPENINGS", "DXF_ENTITY_RICHNESS", "DXF_NO_RAW_INTERNAL_STRINGS", "DXF_NO_STALE_GOLDEN_LABELS") if name in statuses),
             visual_qa=dxf_market_ready,
             customer_ready=dxf_market_ready,
             technical_ready=dxf_technical_ready,

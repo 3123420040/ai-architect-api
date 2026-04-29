@@ -91,6 +91,9 @@ def test_concept_pdf_and_dxf_render_from_source_geometry(tmp_path: Path):
     assert "Mặt tiền concept" in text
     assert "Tầng-tầng 3.30 m" in text
     assert "Thông thủy ~3.00 m" in text
+    assert "Sinh hoạt chung" in text
+    assert "Kích thước sơ bộ để review công năng" in text
+    assert "stair_lightwell" not in text
     assert any(" m x " in line and "m²" not in line for line in text.splitlines())
     with fitz.open(result.bundle.pdf_path) as doc:
         assert doc.page_count == len(result.drawing_package.sheets)
@@ -125,6 +128,8 @@ def test_concept_pdf_and_dxf_render_from_source_geometry(tmp_path: Path):
     opening_schedule_text = "\n".join(entity.dxf.text for entity in opening_schedule_doc.modelspace() if entity.dxftype() == "TEXT")
     assert "{'type':" not in opening_schedule_text
     assert '"type":' not in opening_schedule_text
+    assert "Sinh hoat chung" in schedule_text
+    assert "Review cong nang" in schedule_text
 
     physical_gates = validate_physical_sheet_presence(result.drawing_package, result.bundle)
     assert concept_qa_passed(physical_gates)
@@ -136,6 +141,17 @@ def test_concept_pdf_and_dxf_render_from_source_geometry(tmp_path: Path):
         "CONCEPT_DXF_RENDER_ARTIFACTS",
         "CONCEPT_RENDER_SCOPE_TEXT",
     } <= gate_codes
+    rendered_gate_names = {gate.name for gate in result.bundle.gate_results}
+    assert {
+        "PDF_SHEET_TITLE_BLOCKS",
+        "PDF_CONCEPT_SCOPE_TEXT",
+        "PDF_PLAN_VIEWPORT_USAGE",
+        "PDF_ROOM_LABEL_NON_OVERLAP",
+        "DXF_SHEET_PARITY",
+        "DXF_MODELSPACE_NONEMPTY",
+        "DXF_SHEET_TITLE_BLOCKS",
+        "DXF_ENTITY_RICHNESS",
+    } <= rendered_gate_names
 
 
 def test_concept_render_qa_gates_report_pass_or_explicit_skip(tmp_path: Path):

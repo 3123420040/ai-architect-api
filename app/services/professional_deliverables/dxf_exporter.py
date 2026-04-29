@@ -113,6 +113,73 @@ def _room_size_label(room) -> str:
     return f"{format_dimension_m(max_x - min_x)} x {format_dimension_m(max_y - min_y)}"
 
 
+def _room_type_key(room) -> str:
+    return str(room.original_type or room.category or "").strip().lower()
+
+
+def _room_type_display_label(room) -> str:
+    room_type = _room_type_key(room)
+    if "bedroom" in room_type:
+        return "Phong ngu"
+    if "bath" in room_type or "wc" in room_type:
+        return "WC / tam"
+    if "kitchen" in room_type or "dining" in room_type:
+        return "Bep / an"
+    if "living" in room_type:
+        return "Sinh hoat chung"
+    if "stair" in room_type or "lightwell" in room_type or "core" in room_type:
+        return "Loi thang / lay sang"
+    if "storage" in room_type:
+        return "Kho / luu tru"
+    if "laundry" in room_type or "service" in room_type:
+        return "Giat phoi / ky thuat"
+    if "parking" in room_type or "garage" in room_type:
+        return "Dau xe / dich vu"
+    if "terrace" in room_type or "balcony" in room_type or "garden" in room_type:
+        return "Khong gian ngoai"
+    if "worship" in room_type:
+        return "Tho / yen tinh"
+    if room_type:
+        return room_type.replace("_", " ").title()
+    return "Khong gian concept"
+
+
+def _room_schedule_note(room) -> str:
+    room_type = _room_type_key(room)
+    min_x, min_y, max_x, max_y = _bounds_m(room.polygon)
+    if min(max_x - min_x, max_y - min_y) < 1.35:
+        return "Kiem tra be ngang"
+    if "stair" in room_type or "lightwell" in room_type or "core" in room_type:
+        return "Loi dung concept"
+    if "bath" in room_type or "wc" in room_type or "laundry" in room_type:
+        return "Nhom uot/service"
+    if "storage" in room_type:
+        return "Diem luu tru"
+    if "terrace" in room_type or "garden" in room_type or "balcony" in room_type:
+        return "Khong gian thoang"
+    return "Review cong nang"
+
+
+def _room_needs_hatch(room) -> bool:
+    room_type = _room_type_key(room)
+    return any(token in room_type for token in ("bath", "wc", "laundry", "service", "stair", "lightwell", "core", "storage", "terrace", "garden", "balcony"))
+
+
+def _draw_room_hatch(msp, room) -> None:
+    if not _room_needs_hatch(room):
+        return
+    min_x, min_y, max_x, max_y = _bounds_m(room.polygon)
+    spacing = 0.38
+    cursor = min_x - (max_y - min_y)
+    while cursor < max_x:
+        start_x = max(cursor, min_x)
+        start_y = min_y + max(0.0, min_x - cursor)
+        end_x = min(cursor + (max_y - min_y), max_x)
+        end_y = min_y + min(max_y - min_y, max_x - cursor)
+        _add_polyline(msp, [(start_x, start_y), (end_x, end_y)], layer="A-ANNO-NPLT", lineweight=5)
+        cursor += spacing
+
+
 def _draw_title_note(msp, project: DrawingProject, sheet: SheetSpec) -> None:
     title_width = _sheet_content_width(project, sheet)
     left = -1.4
@@ -200,6 +267,7 @@ def _draw_floorplan(msp, project: DrawingProject, floor: int) -> None:
         _add_polyline(msp, [wall.start, wall.end], layer=wall.layer, lineweight=50 if wall.is_exterior else 25)
     for room in project.rooms_for_floor(floor):
         _add_polyline(msp, room.polygon, layer="A-AREA", closed=True, lineweight=13)
+        _draw_room_hatch(msp, room)
         label_width = max(1.7, min(3.8, len(room.name) * 0.095))
         label_height = 0.58
         cx, cy = room.center
@@ -230,6 +298,14 @@ def _draw_floorplan(msp, project: DrawingProject, floor: int) -> None:
     ):
         _add_polyline(msp, [(x - 0.12, y - 0.12), (x + 0.12, y - 0.12), (x + 0.12, y + 0.12), (x - 0.12, y + 0.12)], layer="S-COLS", closed=True)
     _add_polyline(msp, [(0.1, project.lot_depth_m * 0.55), (min(2.0, project.lot_width_m * 0.45), project.lot_depth_m * 0.72)], layer="A-ANNO-NPLT")
+    if floor == 1:
+        _add_polyline(
+            msp,
+            [(project.lot_width_m / 2.0, 0.35), (project.lot_width_m / 2.0, min(project.lot_depth_m * 0.42, project.lot_depth_m - 0.8))],
+            layer="A-ANNO-NPLT",
+            lineweight=13,
+        )
+        _add_text(msp, "Loi vao chinh", (project.lot_width_m / 2.0 + 0.18, min(project.lot_depth_m * 0.42, project.lot_depth_m - 0.8) + 0.12), height=0.12, layer="A-ANNO-TEXT")
     _draw_dimensions(msp, project)
     _draw_north_arrow(msp, (project.lot_width_m + 0.85, max(project.lot_depth_m - 1.5, 0.8)), project.north_angle_degrees)
     _add_text(msp, f"Tang {floor}: kich thuoc phong nam trong nhan phong de review ty le.", (0.0, project.lot_depth_m + 0.55), height=0.14, layer="A-ANNO-TEXT")
@@ -356,7 +432,7 @@ def _draw_room_area_schedule(msp, project: DrawingProject) -> None:
     for room in project.rooms:
         _draw_table(
             msp,
-            (f"Tang {room.floor}", room.name, room.original_type or room.category or "-", _room_size_label(room), f"{room.display_area_m2:.1f} m2", "polygon concept"),
+            (f"Tang {room.floor}", room.name, _room_type_display_label(room), _room_size_label(room), f"{room.display_area_m2:.1f} m2", _room_schedule_note(room)),
             widths,
             0.0,
             y,

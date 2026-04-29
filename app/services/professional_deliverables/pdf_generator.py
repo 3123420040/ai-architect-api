@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -31,6 +32,17 @@ ROOM_FILL = colors.HexColor("#fbf7fc")
 NOTE_FILL = colors.HexColor("#f8f9fa")
 HEADER_FILL = colors.HexColor("#eef2f6")
 SITE_FILL = colors.HexColor("#f7fbf7")
+
+
+@dataclass(frozen=True)
+class RoomLabelBox:
+    room_id: str
+    floor: int
+    rect: tuple[float, float, float, float]
+    room_rect: tuple[float, float, float, float]
+    label_size: float
+    area_size: float
+    show_size: bool
 
 
 def format_dimension_m(value: float) -> str:
@@ -292,6 +304,55 @@ def _bounds_m(points: tuple[tuple[float, float], ...] | list[tuple[float, float]
     return min(xs), min(ys), max(xs), max(ys)
 
 
+def _room_type_key(room) -> str:
+    return str(room.original_type or room.category or "").strip().lower()
+
+
+def _room_type_display_label(room) -> str:
+    room_type = _room_type_key(room)
+    if "bedroom" in room_type:
+        return "Phòng ngủ"
+    if "bath" in room_type or "wc" in room_type:
+        return "WC / tắm"
+    if "kitchen" in room_type or "dining" in room_type:
+        return "Bếp / ăn"
+    if "living" in room_type:
+        return "Sinh hoạt chung"
+    if "stair" in room_type or "lightwell" in room_type or "core" in room_type:
+        return "Lõi thang / lấy sáng"
+    if "storage" in room_type:
+        return "Kho / lưu trữ"
+    if "laundry" in room_type or "service" in room_type:
+        return "Giặt phơi / kỹ thuật"
+    if "parking" in room_type or "garage" in room_type:
+        return "Đậu xe / dịch vụ"
+    if "terrace" in room_type or "balcony" in room_type or "garden" in room_type:
+        return "Không gian ngoài"
+    if "worship" in room_type:
+        return "Thờ / yên tĩnh"
+    if room_type:
+        return room_type.replace("_", " ").title()
+    return "Không gian concept"
+
+
+def _room_schedule_note(room) -> str:
+    room_type = _room_type_key(room)
+    min_x, min_y, max_x, max_y = _bounds_m(room.polygon)
+    width_m = max_x - min_x
+    depth_m = max_y - min_y
+    if min(width_m, depth_m) < 1.35:
+        return "Cần kiểm tra bề ngang khi phát triển thiết kế"
+    if "stair" in room_type or "lightwell" in room_type or "core" in room_type:
+        return "Lõi đứng concept để đọc thông tầng"
+    if "bath" in room_type or "wc" in room_type or "laundry" in room_type:
+        return "Nhóm ướt/service để kiểm tra stacking"
+    if "storage" in room_type:
+        return "Điểm lưu trữ theo ưu tiên brief"
+    if "terrace" in room_type or "garden" in room_type or "balcony" in room_type:
+        return "Không gian ngoài trời/thoáng ở mức concept"
+    return "Kích thước sơ bộ để review công năng"
+
+
 def _room_size_label(room) -> str:
     min_x, min_y, max_x, max_y = _bounds_m(room.polygon)
     width_m = max_x - min_x
@@ -305,25 +366,54 @@ def _clamp(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
 
 
-def _draw_room_label(c: canvas.Canvas, room, tx: Callable[[float, float], tuple[float, float]]) -> None:
+def _room_label_box(room, tx: Callable[[float, float], tuple[float, float]]) -> RoomLabelBox:
     min_x, min_y, max_x, max_y = _point_bounds(room.polygon, tx)
     room_width = max_x - min_x
     room_height = max_y - min_y
-    label_width = min(max(room_width - 8, 58), 132)
-    label_height = 34 if room_height >= 42 else 27
-    label_size = 7.1 if label_width >= 78 and room_height >= 34 else 5.9
-    area_size = max(5.4, label_size - 0.8)
+    max_label_width = max(4.0, room_width - 4.0)
+    label_width = min(max(room_width - 8.0, 58.0), 132.0, max_label_width)
+    max_label_height = max(8.0, room_height - 4.0)
+    label_height = min(34.0 if room_height >= 42.0 else 27.0, max_label_height)
+    show_size = label_width >= 50.0 and label_height >= 28.0
+    if label_width < 58.0 or label_height < 27.0:
+        label_size = 5.1
+    elif label_width >= 78.0 and room_height >= 34.0:
+        label_size = 7.1
+    else:
+        label_size = 5.9
+    area_size = max(4.8, label_size - 0.8)
     center_x, center_y = tx(*room.center)
-    box_x = _clamp(center_x - label_width / 2, min_x + 3, max_x - label_width - 3)
-    box_y = _clamp(center_y - label_height / 2, min_y + 3, max_y - label_height - 3)
+    box_x = _clamp(center_x - label_width / 2.0, min_x + 2.0, max_x - label_width - 2.0)
+    box_y = _clamp(center_y - label_height / 2.0, min_y + 2.0, max_y - label_height - 2.0)
+    return RoomLabelBox(
+        room_id=room.id,
+        floor=room.floor,
+        rect=(box_x, box_y, box_x + label_width, box_y + label_height),
+        room_rect=(min_x, min_y, max_x, max_y),
+        label_size=label_size,
+        area_size=area_size,
+        show_size=show_size,
+    )
+
+
+def room_label_boxes(project: DrawingProject, floor: int) -> tuple[RoomLabelBox, ...]:
+    tx = _transform(project)
+    return tuple(_room_label_box(room, tx) for room in project.rooms_for_floor(floor))
+
+
+def _draw_room_label(c: canvas.Canvas, room, tx: Callable[[float, float], tuple[float, float]]) -> None:
+    label = _room_label_box(room, tx)
+    box_x1, box_y1, box_x2, box_y2 = label.rect
+    label_width = box_x2 - box_x1
+    label_height = box_y2 - box_y1
     c.setFillColor(colors.white)
     c.setStrokeColor(colors.HexColor("#c9a0cf"))
     c.setLineWidth(0.35)
-    c.roundRect(box_x, box_y, label_width, label_height, 3, stroke=1, fill=1)
-    _text(c, _fit_text(room.name, label_width - 8, size=label_size, bold=True), box_x + 4, box_y + label_height - 10, size=label_size, bold=True, color=colors.darkmagenta)
-    _text(c, f"{room.display_area_m2:.1f} m²", box_x + 4, box_y + label_height - 20, size=area_size, color=colors.darkmagenta)
-    if label_height >= 30:
-        _text(c, _fit_text(_room_size_label(room), label_width - 8, size=area_size), box_x + 4, box_y + 5, size=area_size, color=colors.darkmagenta)
+    c.roundRect(box_x1, box_y1, label_width, label_height, 2.5, stroke=1, fill=1)
+    _text(c, _fit_text(room.name, label_width - 8, size=label.label_size, bold=True), box_x1 + 4, box_y1 + label_height - 10, size=label.label_size, bold=True, color=colors.darkmagenta)
+    _text(c, f"{room.display_area_m2:.1f} m²", box_x1 + 4, box_y1 + label_height - 20, size=label.area_size, color=colors.darkmagenta)
+    if label.show_size:
+        _text(c, _fit_text(_room_size_label(room), label_width - 8, size=label.area_size), box_x1 + 4, box_y1 + 5, size=label.area_size, color=colors.darkmagenta)
 
 
 def _draw_plan_key(c: canvas.Canvas, project: DrawingProject) -> None:
@@ -353,6 +443,27 @@ def _draw_plan_key(c: canvas.Canvas, project: DrawingProject) -> None:
     c.setStrokeColor(colors.HexColor("#d0d7de"))
     c.roundRect(x + 8, y + 10, width - 16, 20, 3, stroke=1, fill=1)
     _text(c, _fit_text(_customer_style_label(project), width - 24, size=6.3), x + 12, y + 17, size=6.3, color=MUTED_INK)
+
+
+def _draw_floor_room_index(c: canvas.Canvas, project: DrawingProject, floor: int) -> None:
+    rooms = project.rooms_for_floor(floor)
+    if not rooms:
+        return
+    x = PAGE_SIZE[0] - MARGIN - 154
+    y = CONTENT_TOP - 254
+    width = 140
+    height = min(170, 28 + len(rooms[:9]) * 14)
+    c.setFillColor(colors.white)
+    c.setStrokeColor(colors.HexColor("#d0d7de"))
+    c.setLineWidth(0.4)
+    c.roundRect(x, y - height, width, height, 4, stroke=1, fill=1)
+    _text(c, f"Danh mục phòng tầng {floor}", x + 8, y - 14, size=6.8, bold=True, color=INK)
+    cursor = y - 30
+    for room in rooms[:9]:
+        _text(c, f"{room.name} - {room.display_area_m2:.1f} m²", x + 8, cursor, size=5.6, color=MUTED_INK)
+        cursor -= 13
+    if len(rooms) > 9:
+        _text(c, f"+ {len(rooms) - 9} phòng xem bảng A-601", x + 8, cursor, size=5.6, color=MUTED_INK)
 
 
 def _draw_cover_index(c: canvas.Canvas, project: DrawingProject, sheets: tuple[SheetSpec, ...]) -> None:
@@ -473,13 +584,72 @@ def _draw_fixture(c: canvas.Canvas, fixture: Fixture, tx: Callable[[float, float
     _text(c, fixture.label, x - w / 2.0, y + h / 2.0 + 4, size=5.5, color=colors.darkgreen)
 
 
+def _room_fill(room):
+    room_type = _room_type_key(room)
+    if "bath" in room_type or "wc" in room_type or "laundry" in room_type or "service" in room_type:
+        return colors.HexColor("#eef7fb")
+    if "stair" in room_type or "lightwell" in room_type or "core" in room_type:
+        return colors.HexColor("#f2f3f5")
+    if "storage" in room_type:
+        return colors.HexColor("#fff5dc")
+    if "terrace" in room_type or "garden" in room_type or "balcony" in room_type:
+        return colors.HexColor("#eef8ec")
+    return ROOM_FILL
+
+
+def _room_needs_hatch(room) -> bool:
+    room_type = _room_type_key(room)
+    return any(token in room_type for token in ("bath", "wc", "laundry", "service", "stair", "lightwell", "core", "storage", "terrace", "garden", "balcony"))
+
+
+def _draw_room_hatch(c: canvas.Canvas, room, tx: Callable[[float, float], tuple[float, float]]) -> None:
+    if not _room_needs_hatch(room):
+        return
+    min_x, min_y, max_x, max_y = _point_bounds(room.polygon, tx)
+    c.setStrokeColor(colors.HexColor("#c9d1d9"))
+    c.setLineWidth(0.25)
+    spacing = 9.0
+    cursor = min_x - (max_y - min_y)
+    while cursor < max_x:
+        start_x = max(cursor, min_x)
+        start_y = min_y + max(0.0, min_x - cursor)
+        end_x = min(cursor + (max_y - min_y), max_x)
+        end_y = min_y + min(max_y - min_y, max_x - cursor)
+        c.line(start_x, start_y, end_x, end_y)
+        cursor += spacing
+
+
+def _draw_circulation_arrow(c: canvas.Canvas, project: DrawingProject, floor: int, tx: Callable[[float, float], tuple[float, float]]) -> None:
+    if floor == 1:
+        start = tx(project.lot_width_m / 2.0, 0.35)
+        mid = tx(project.lot_width_m / 2.0, min(project.lot_depth_m * 0.42, project.lot_depth_m - 0.8))
+        label = "Luồng vào chính"
+    else:
+        rooms = project.rooms_for_floor(floor)
+        core = next((room for room in rooms if "stair" in _room_type_key(room) or "lightwell" in _room_type_key(room) or "core" in _room_type_key(room)), None)
+        if core is None:
+            return
+        start = tx(*core.center)
+        mid = tx(project.lot_width_m / 2.0, min(project.lot_depth_m - 0.7, core.center[1] + max(project.lot_depth_m * 0.18, 1.0)))
+        label = "Kết nối từ lõi thang"
+    c.setStrokeColor(colors.HexColor("#1a73e8"))
+    c.setLineWidth(0.8)
+    c.setDash(3, 2)
+    c.line(start[0], start[1], mid[0], mid[1])
+    c.setDash()
+    c.line(mid[0], mid[1], mid[0] - 4, mid[1] - 7)
+    c.line(mid[0], mid[1], mid[0] + 4, mid[1] - 7)
+    _text(c, label, mid[0] + 6, mid[1] + 4, size=6.2, color=colors.HexColor("#1a73e8"))
+
+
 def _draw_floorplan(c: canvas.Canvas, project: DrawingProject, sheet: SheetSpec) -> None:
     assert sheet.floor is not None
     _, _, scale = plan_layout(project)
     tx = _transform(project)
     _poly(c, project.site_polygon, tx, close=True, stroke=INK, width=1.2, fill=colors.HexColor("#fffdf8"))
     for room in project.rooms_for_floor(sheet.floor):
-        _poly(c, room.polygon, tx, close=True, stroke=ROOM_STROKE, width=0.45, fill=ROOM_FILL)
+        _poly(c, room.polygon, tx, close=True, stroke=ROOM_STROKE, width=0.45, fill=_room_fill(room))
+        _draw_room_hatch(c, room, tx)
     for wall in project.walls_for_floor(sheet.floor):
         _poly(
             c,
@@ -494,10 +664,12 @@ def _draw_floorplan(c: canvas.Canvas, project: DrawingProject, sheet: SheetSpec)
         _draw_fixture(c, fixture, tx, scale=scale)
     for room in project.rooms_for_floor(sheet.floor):
         _draw_room_label(c, room, tx)
+    _draw_circulation_arrow(c, project, sheet.floor, tx)
     _draw_floorplan_intent_notes(c, project, sheet.floor)
     _draw_dimensions(c, project, tx)
     _draw_north_arrow(c, PAGE_SIZE[0] - 112, PAGE_SIZE[1] - 122, project.north_angle_degrees)
     _draw_plan_key(c, project)
+    _draw_floor_room_index(c, project, sheet.floor)
 
 
 def _draw_site(c: canvas.Canvas, project: DrawingProject) -> None:
@@ -778,10 +950,10 @@ def _draw_room_area_schedule(c: canvas.Canvas, project: DrawingProject) -> None:
         values = (
             f"Tầng {room.floor}",
             room.name,
-            room.original_type or room.category or "-",
+            _room_type_display_label(room),
             _room_size_label(room),
             f"{room.display_area_m2:.1f} m²",
-            "Diện tích concept từ polygon sơ bộ",
+            _room_schedule_note(room),
         )
         _draw_table_row(c, values, widths, x, y)
         y -= 18

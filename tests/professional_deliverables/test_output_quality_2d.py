@@ -8,9 +8,22 @@ import fitz
 import pytest
 
 from app.services.geometry import LAYER_2_SCHEMA
+from app.services.professional_deliverables.artifact_quality_report import build_2d_artifact_readiness
 from app.services.professional_deliverables.demo import generate_project_2d_bundle
-from app.services.professional_deliverables.drawing_quality_gates import validate_pdf_elevation_layout, validate_pdf_no_title_overlap
+from app.services.professional_deliverables.drawing_quality_gates import (
+    validate_dxf_entity_richness,
+    validate_dxf_modelspace_nonempty,
+    validate_dxf_sheet_parity,
+    validate_dxf_sheet_title_blocks,
+    validate_pdf_elevation_layout,
+    validate_pdf_no_title_overlap,
+    validate_pdf_plan_viewport_usage,
+    validate_pdf_room_label_non_overlap,
+    validate_pdf_sheet_title_blocks,
+)
 from app.services.professional_deliverables.geometry_adapter import geometry_to_drawing_project
+from app.services.professional_deliverables.sheet_assembler import assemble_sheet_set
+from app.services.professional_deliverables.validators import GateResult
 
 
 def _rect(x1: float, y1: float, x2: float, y2: float) -> list[list[float]]:
@@ -128,6 +141,15 @@ def test_pdf_elevation_frames_do_not_overlap(quality_bundle):
     assert validate_pdf_elevation_layout(project).status == "pass"
 
 
+def test_pdf_viewport_sheet_titles_and_room_label_non_overlap_signals_pass(quality_bundle):
+    project, result = quality_bundle
+    sheets = assemble_sheet_set(project)
+
+    assert validate_pdf_sheet_title_blocks(result.pdf_path, sheets).status == "pass"
+    assert validate_pdf_plan_viewport_usage(project).status == "pass"
+    assert validate_pdf_room_label_non_overlap(project).status == "pass"
+
+
 def test_dxf_uses_actual_lot_dimensions_for_project_geometry(quality_bundle):
     _project, result = quality_bundle
     site_doc = ezdxf.readfile(result.two_d_dir / "A-100-site.dxf")
@@ -171,6 +193,16 @@ def test_dxf_room_labels_and_openings_present(quality_bundle):
     assert "A-GLAZ" in layers
 
 
+def test_dxf_sheet_parity_title_blocks_and_entity_richness_pass(quality_bundle):
+    project, result = quality_bundle
+    sheets = assemble_sheet_set(project)
+
+    assert validate_dxf_sheet_parity(result.dxf_paths, sheets).status == "pass"
+    assert validate_dxf_modelspace_nonempty(result.dxf_paths).status == "pass"
+    assert validate_dxf_sheet_title_blocks(result.dxf_paths, sheets).status == "pass"
+    assert validate_dxf_entity_richness(result.dxf_paths, sheets).status == "pass"
+
+
 def test_quality_report_contains_artifact_readiness(quality_bundle):
     _project, result = quality_bundle
 
@@ -180,6 +212,57 @@ def test_quality_report_contains_artifact_readiness(quality_bundle):
 
     assert roles["pdf"]["state"] == "ready"
     assert roles["pdf"]["customer_ready"] is True
+    assert roles["pdf"]["visual_qa"] is True
     assert roles["dxf"]["state"] == "ready"
     assert roles["dwg"]["state"] == "skipped"
     assert {"exists", "format_valid", "semantic_valid", "visual_qa", "customer_ready"} <= set(roles["pdf"])
+    assert "PDF_PLAN_VIEWPORT_USAGE" in roles["pdf"]["gates"]
+    assert "PDF_ROOM_LABEL_NON_OVERLAP" in roles["pdf"]["gates"]
+    assert "DXF_SHEET_PARITY" in roles["dxf"]["gates"]
+
+
+def test_visual_qa_failure_prevents_market_customer_readiness(tmp_path: Path):
+    pdf_path = tmp_path / "bundle.pdf"
+    dxf_path = tmp_path / "A-100-site.dxf"
+    pdf_path.write_bytes(b"%PDF-visual-fail-placeholder")
+    dxf_path.write_bytes(b"0\nEOF\n")
+
+    readiness = build_2d_artifact_readiness(
+        pdf_path=pdf_path,
+        dxf_paths=(dxf_path,),
+        dwg_paths=(),
+        gate_results=(
+            GateResult("PDF_PAGE_COUNT", "pass", "ok"),
+            GateResult("PDF_SHEET_TITLE_BLOCKS", "pass", "ok"),
+            GateResult("PDF_CONCEPT_SCOPE_TEXT", "pass", "ok"),
+            GateResult("PDF_DYNAMIC_DIMENSIONS", "pass", "ok"),
+            GateResult("PDF_SITE_BOUNDARY_MATCH", "pass", "ok"),
+            GateResult("PDF_FLOOR_COUNT", "pass", "ok"),
+            GateResult("PDF_ROOM_LABELS_AREAS", "pass", "ok"),
+            GateResult("PDF_DIMENSION_CHAINS", "pass", "ok"),
+            GateResult("PDF_NO_STALE_GOLDEN_LABELS", "pass", "ok"),
+            GateResult("PDF_PLAN_VIEWPORT_USAGE", "fail", "too much whitespace"),
+            GateResult("PDF_ROOM_LABEL_NON_OVERLAP", "pass", "ok"),
+            GateResult("PDF_NO_TITLE_OVERLAP", "pass", "ok"),
+            GateResult("PDF_PAGE_RENDER_NONBLANK", "pass", "ok"),
+            GateResult("PDF_ELEVATION_LAYOUT", "pass", "ok"),
+            GateResult("DXF_SHEET_PARITY", "pass", "ok"),
+            GateResult("DXF_MODELSPACE_NONEMPTY", "pass", "ok"),
+            GateResult("DXF_SHEET_TITLE_BLOCKS", "pass", "ok"),
+            GateResult("DXF_OPENABLE", "pass", "ok"),
+            GateResult("DXF_UNITS_METERS", "pass", "ok"),
+            GateResult("DXF_REQUIRED_LAYERS", "pass", "ok"),
+            GateResult("DXF_PROJECT_EXTENTS_MATCH", "pass", "ok"),
+            GateResult("DXF_DIMENSIONS_MATCH", "pass", "ok"),
+            GateResult("DXF_ROOM_LABELS_OPENINGS", "pass", "ok"),
+            GateResult("DXF_NO_STALE_GOLDEN_LABELS", "pass", "ok"),
+        ),
+        dwg_skip_reason="ODA converter unavailable locally",
+    )
+
+    pdf = next(item for item in readiness if item.artifact_role == "pdf")
+    assert pdf.technical_ready is True
+    assert pdf.visual_qa is False
+    assert pdf.customer_ready is False
+    assert pdf.market_presentation_ready is False
+    assert pdf.state == "partial"

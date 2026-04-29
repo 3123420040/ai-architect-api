@@ -11,10 +11,12 @@ from app.services.professional_deliverables.drawing_contract import DrawingProje
 from app.services.professional_deliverables.pdf_generator import (
     CONTENT_BOTTOM,
     CONTENT_TOP,
+    MARGIN,
     PAGE_SIZE,
     SCALE_1_100_PT_PER_M,
     format_dimension_m,
     plan_layout,
+    room_label_boxes,
 )
 from app.services.professional_deliverables.validators import GateResult
 
@@ -154,6 +156,48 @@ def validate_pdf_elevation_visual_density(path: Path, *, minimum_ratio: float = 
     if sparse_pages:
         return GateResult("PDF_ELEVATION_VISUAL_DENSITY", "fail", "sparse elevation pages: " + ", ".join(sparse_pages))
     return GateResult("PDF_ELEVATION_VISUAL_DENSITY", "pass", f"elevation pages meet density threshold {minimum_ratio:.3f}")
+
+
+def validate_pdf_plan_viewport_usage(project: DrawingProject, *, minimum_major_axis_ratio: float = 0.50) -> GateResult:
+    x, y, scale = plan_layout(project)
+    available_width = PAGE_SIZE[0] - 2 * MARGIN - 132.0
+    available_height = CONTENT_TOP - CONTENT_BOTTOM - 26.0
+    drawing_width = project.lot_width_m * scale
+    drawing_height = project.lot_depth_m * scale
+    major_axis_ratio = max(drawing_width / available_width, drawing_height / available_height)
+    if major_axis_ratio < minimum_major_axis_ratio:
+        return GateResult(
+            "PDF_PLAN_VIEWPORT_USAGE",
+            "fail",
+            f"plan uses major axis ratio {major_axis_ratio:.2f}, expected >= {minimum_major_axis_ratio:.2f}",
+        )
+    if x < 0 or y < CONTENT_BOTTOM - 0.5 or y + drawing_height > CONTENT_TOP + 0.5:
+        return GateResult("PDF_PLAN_VIEWPORT_USAGE", "fail", "plan viewport exceeds content area")
+    return GateResult("PDF_PLAN_VIEWPORT_USAGE", "pass", f"plan viewport uses {major_axis_ratio:.2f} of available major axis")
+
+
+def validate_pdf_room_label_non_overlap(project: DrawingProject) -> GateResult:
+    overlaps: list[str] = []
+    out_of_room: list[str] = []
+    for floor in range(1, project.storeys + 1):
+        boxes = room_label_boxes(project, floor)
+        for box in boxes:
+            x1, y1, x2, y2 = box.rect
+            rx1, ry1, rx2, ry2 = box.room_rect
+            if x1 < rx1 - 0.5 or y1 < ry1 - 0.5 or x2 > rx2 + 0.5 or y2 > ry2 + 0.5:
+                out_of_room.append(f"F{floor}:{box.room_id}")
+        for index, left in enumerate(boxes):
+            for right in boxes[index + 1 :]:
+                if _rectangles_overlap(left.rect, right.rect, padding=1.0):
+                    overlaps.append(f"F{floor}:{left.room_id}/{right.room_id}")
+    if out_of_room or overlaps:
+        detail = []
+        if out_of_room:
+            detail.append("out_of_room=" + ", ".join(out_of_room[:6]))
+        if overlaps:
+            detail.append("overlap=" + ", ".join(overlaps[:6]))
+        return GateResult("PDF_ROOM_LABEL_NON_OVERLAP", "fail", "; ".join(detail))
+    return GateResult("PDF_ROOM_LABEL_NON_OVERLAP", "pass", "computed room label boxes stay inside rooms without overlap")
 
 
 def validate_pdf_no_title_overlap(project: DrawingProject) -> GateResult:
@@ -360,6 +404,17 @@ def validate_dxf_room_labels_openings(paths: Path | tuple[Path, ...] | list[Path
     return GateResult("DXF_ROOM_LABELS_OPENINGS", "pass", f"{len(project.rooms)} room labels and {len(opening_entities)} opening entities present")
 
 
+def validate_dxf_sheet_parity(paths: Path | tuple[Path, ...] | list[Path], sheets: tuple | list) -> GateResult:
+    all_paths = (paths,) if isinstance(paths, Path) else tuple(paths)
+    actual = {path.name for path in all_paths if path.exists()}
+    expected = {getattr(sheet, "dxf_filename", "") for sheet in sheets}
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    if missing or extra:
+        return GateResult("DXF_SHEET_PARITY", "fail", f"missing={missing[:8]}, extra={extra[:8]}")
+    return GateResult("DXF_SHEET_PARITY", "pass", f"{len(expected)} DXF sheets match sheet set metadata")
+
+
 def validate_dxf_sheet_title_blocks(paths: Path | tuple[Path, ...] | list[Path], sheets: tuple | list) -> GateResult:
     all_paths = (paths,) if isinstance(paths, Path) else tuple(paths)
     paths_by_name = {path.name: path for path in all_paths}
@@ -392,6 +447,30 @@ def validate_dxf_modelspace_nonempty(paths: Path | tuple[Path, ...] | list[Path]
     return GateResult("DXF_MODELSPACE_NONEMPTY", "pass", f"{len(all_paths)} DXF sheets contain entities")
 
 
+def validate_dxf_entity_richness(paths: Path | tuple[Path, ...] | list[Path], sheets: tuple | list) -> GateResult:
+    all_paths = (paths,) if isinstance(paths, Path) else tuple(paths)
+    paths_by_name = {path.name: path for path in all_paths}
+    weak: list[str] = []
+    for sheet in sheets:
+        path = paths_by_name.get(getattr(sheet, "dxf_filename", ""))
+        if path is None or not path.exists():
+            weak.append(getattr(sheet, "number", path.name if path else "missing"))
+            continue
+        doc = ezdxf.readfile(path)
+        entities = list(doc.modelspace())
+        layers = {getattr(entity.dxf, "layer", "") for entity in entities}
+        if len(entities) < 8:
+            weak.append(f"{path.name}: {len(entities)} entities")
+            continue
+        if getattr(sheet, "kind", "") == "floorplan" and not {"A-WALL", "A-AREA", "A-ANNO-DIMS", "A-ANNO-TEXT"} <= layers:
+            weak.append(f"{path.name}: weak floorplan layers")
+        if getattr(sheet, "kind", "") in {"elevations", "sections"} and len(entities) < 24:
+            weak.append(f"{path.name}: sparse concept drawing")
+    if weak:
+        return GateResult("DXF_ENTITY_RICHNESS", "fail", "weak DXF sheets: " + ", ".join(weak[:8]))
+    return GateResult("DXF_ENTITY_RICHNESS", "pass", f"{len(all_paths)} DXF sheets have review-useful entity richness")
+
+
 def validate_dxf_no_stale_golden_labels(paths: Path | tuple[Path, ...] | list[Path], project: DrawingProject) -> GateResult:
     all_paths = (paths,) if isinstance(paths, Path) else tuple(paths)
     text = "\n".join(_dxf_text(ezdxf.readfile(path)) for path in all_paths)
@@ -405,6 +484,15 @@ def _bounds(points: tuple[tuple[float, float], ...]) -> tuple[float, float, floa
     xs = [point[0] for point in points]
     ys = [point[1] for point in points]
     return min(xs), min(ys), max(xs), max(ys)
+
+
+def _rectangles_overlap(left: tuple[float, float, float, float], right: tuple[float, float, float, float], *, padding: float = 0.0) -> bool:
+    return not (
+        left[2] + padding <= right[0]
+        or right[2] + padding <= left[0]
+        or left[3] + padding <= right[1]
+        or right[3] + padding <= left[1]
+    )
 
 
 def _raw_internal_hits(text: str) -> list[str]:

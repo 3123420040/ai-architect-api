@@ -199,6 +199,7 @@ async def websocket_stream(websocket: WebSocket, project_id: str) -> None:
                     "brief_contract_state": turn["brief_contract_state"],
                     "brief_contract_label": turn["brief_contract_label"],
                     "brief_can_lock": turn["brief_can_lock"],
+                    "harness": turn.get("harness"),
                 }
             )
     except WebSocketDisconnect:

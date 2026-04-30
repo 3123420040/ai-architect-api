@@ -59,10 +59,13 @@ def test_design_harness_loop_accepts_fake_model_without_live_provider():
     legacy = result.as_legacy_turn()
     assert fake_model.contexts[0]["history_count"] == 1
     assert result.machine.source == "fake_model"
-    assert result.machine.readiness["schema_version"] == "design_harness_readiness_stub_v1"
-    assert result.machine.assumptions == []
-    assert legacy["assistant_response"] == "Mình đã ghi nhận nhu cầu nhà phố 5x20m."
+    assert result.machine.readiness["schema_version"] == "design_harness_readiness_v1"
+    assert result.machine.readiness["field_statuses"]["site.width_m"]["status"] == "confirmed"
+    assert result.machine.assumptions
+    assert legacy["assistant_response"].startswith("Mình đã ghi nhận nhu cầu nhà phố 5x20m.")
     assert legacy["harness"]["harness_id"] == "design_intake_harness"
+    assert legacy["harness"]["readiness"]["schema_version"] == "design_harness_readiness_v1"
+    assert legacy["harness"]["assumptions"] == result.machine.assumptions
     assert legacy["harness_trace"]["validation_gates"][0]["name"] == "fake_tool"
 
 
@@ -80,6 +83,7 @@ def test_design_harness_loop_uses_deterministic_unconfigured_path(monkeypatch):
     assert result.harness_trace["source"] == llm.DETERMINISTIC_SOURCE
     assert result.harness_trace["provider_family"] == "none"
     assert "lot.width_m" in result.harness_trace["merged_brief_changed_keys"]
+    assert result.machine.readiness["field_statuses"]["program.bathrooms"]["status"] == "confirmed"
 
 
 def test_design_harness_loop_uses_configured_llm_path(monkeypatch):
@@ -153,6 +157,8 @@ def test_design_harness_legacy_turn_fits_old_chat_response_contract(monkeypatch)
     assert payload["response"] == turn["assistant_response"]
     assert payload["brief_json"]["lot"]["width_m"] == 5
     assert payload["harness"]["harness_id"] == "design_intake_harness"
+    assert payload["harness"]["readiness"]["schema_version"] == "design_harness_readiness_v1"
+    assert isinstance(payload["harness"]["assumptions"], list)
     assert {
         "session_id",
         "status",

@@ -27,4 +27,5 @@ class DesignHarnessTraceStore:
             "brief_contract": brief_contract,
             "harness_trace": turn.get("harness_trace", {}),
             "harness": turn.get("harness", {}),
+            "harness_machine_output": turn.get("harness_machine_output", {}),
         }

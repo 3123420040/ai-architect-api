@@ -1,5 +1,8 @@
 from app.services.design_harness.loop import DesignIntakeHarnessLoop
 from app.services.design_harness.schemas import (
+    DesignAssumption,
+    DesignHarnessReadiness,
+    DesignHarnessFieldStatus,
     DesignHarnessTurnRequest,
     DesignHarnessTurnResult,
     HarnessConversationOutput,
@@ -10,6 +13,9 @@ from app.services.design_harness.schemas import (
 __all__ = [
     "DesignHarnessTurnRequest",
     "DesignHarnessTurnResult",
+    "DesignAssumption",
+    "DesignHarnessFieldStatus",
+    "DesignHarnessReadiness",
     "DesignIntakeHarnessLoop",
     "HarnessConversationOutput",
     "HarnessMachineOutput",

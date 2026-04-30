@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
+
+
+FieldReadinessStatus = str
+AssumptionSource = str
+AssumptionLifecycleStatus = str
 
 
 @dataclass(frozen=True)
@@ -28,6 +33,63 @@ class HarnessMachineOutput:
     source: str = "deterministic"
     readiness: dict[str, Any] = field(default_factory=dict)
     assumptions: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class DesignAssumption:
+    id: str
+    field_path: str
+    value: Any
+    source: AssumptionSource
+    confidence: float
+    needs_confirmation: bool
+    explanation: str
+    status: AssumptionLifecycleStatus = "proposed"
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["confidence"] = round(float(self.confidence), 2)
+        return payload
+
+
+@dataclass(frozen=True)
+class DesignHarnessFieldStatus:
+    field_path: str
+    status: FieldReadinessStatus
+    value: Any = None
+    source: AssumptionSource | None = None
+    confidence: float = 0.0
+    required: bool = False
+    blocks_concept_input: bool = False
+    evidence: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["confidence"] = round(float(self.confidence), 2)
+        return payload
+
+
+@dataclass(frozen=True)
+class DesignHarnessReadiness:
+    schema_version: str
+    status: str
+    confidence: float
+    safe_to_emit_concept_input: bool
+    critical_missing: list[str] = field(default_factory=list)
+    optional_missing: list[str] = field(default_factory=list)
+    confirmed_fields: list[str] = field(default_factory=list)
+    inferred_fields: list[str] = field(default_factory=list)
+    defaulted_fields: list[str] = field(default_factory=list)
+    conflicting_fields: list[str] = field(default_factory=list)
+    assumptions_requiring_confirmation: list[str] = field(default_factory=list)
+    field_statuses: dict[str, dict[str, Any]] = field(default_factory=dict)
+    source: str = "brief_clarification_state"
+    legacy_clarification: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["confidence"] = round(float(self.confidence), 2)
+        return payload
 
 
 @dataclass(frozen=True)
@@ -92,6 +154,9 @@ class DesignHarnessTurnResult:
         return self.trace_metadata.trace
 
     def as_legacy_turn(self) -> dict[str, Any]:
+        harness = self.trace_metadata.public_summary()
+        harness["readiness"] = self.machine.readiness
+        harness["assumptions"] = self.machine.assumptions
         return {
             "assistant_response": self.conversation.assistant_response,
             "assistant_payload": self.conversation.assistant_payload,
@@ -102,7 +167,7 @@ class DesignHarnessTurnResult:
             "conflicts": self.conversation.conflicts,
             "clarification_state": self.conversation.clarification_state,
             "harness_trace": self.trace_metadata.trace,
-            "harness": self.trace_metadata.public_summary(),
+            "harness": harness,
             "harness_machine_output": {
                 "readiness": self.machine.readiness,
                 "assumptions": self.machine.assumptions,

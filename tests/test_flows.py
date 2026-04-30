@@ -105,13 +105,38 @@ def test_project_brief_chat_flow(client, session_payload):
     assert payload["clarification_state"]["total_sections"] >= 6
     assert any(section["id"] == "site" for section in payload["clarification_state"]["sections"])
     assert payload["brief_contract_state"] in {"draft", "ready_to_lock", "reopened"}
+    assert "harness_trace" not in payload
+    assert {
+        "session_id",
+        "status",
+        "response",
+        "brief_json",
+        "needs_follow_up",
+        "follow_up_topics",
+        "source",
+        "assistant_payload",
+        "conflicts",
+        "clarification_state",
+        "brief_contract_state",
+        "brief_contract_label",
+        "brief_can_lock",
+    } <= set(payload)
 
     history_response = client.get(
         f"/api/v1/projects/{project['id']}/chat/history",
         headers=auth_headers(token),
     )
     assert history_response.status_code == 200
-    assert len(history_response.json()["messages"]) == 2
+    history_messages = history_response.json()["messages"]
+    assert len(history_messages) == 2
+    assistant_metadata = history_messages[-1]["metadata"]
+    trace = assistant_metadata["harness_trace"]
+    assert history_messages[-1]["role"] == "ai"
+    assert trace["source"] == assistant_metadata["source"]
+    assert trace["prompt_id"] == "intake_structured_extraction_v1"
+    assert trace["recent_history_count"] == 0
+    assert "lot.width_m" in trace["merged_brief_changed_keys"]
+    assert assistant_metadata["assistant_payload"]["source_metadata"]["trace_summary"] == trace
 
 
 def test_project_list_returns_newest_projects_first(client, session_payload):
@@ -179,13 +204,16 @@ def test_chat_websocket_stream_persists_turn(client, session_payload):
     assert "assistant_payload" in done_payload
     assert done_payload["clarification_state"]["total_sections"] >= 6
     assert done_payload["brief_contract_state"] in {"draft", "ready_to_lock", "reopened"}
+    assert "harness_trace" not in done_payload
 
     history_response = client.get(
         f"/api/v1/projects/{project['id']}/chat/history",
         headers=auth_headers(token),
     )
     assert history_response.status_code == 200
-    assert len(history_response.json()["messages"]) == 2
+    history_messages = history_response.json()["messages"]
+    assert len(history_messages) == 2
+    assert history_messages[-1]["metadata"]["harness_trace"]["source"] == history_messages[-1]["metadata"]["source"]
 
 
 def test_generation_requires_locked_brief_and_chat_reopens_brief(client, session_payload):

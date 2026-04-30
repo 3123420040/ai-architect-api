@@ -102,6 +102,7 @@ class ChatResponse(BaseModel):
     brief_contract_state: str = "draft"
     brief_contract_label: str = "Đang làm rõ"
     brief_can_lock: bool = False
+    harness: dict[str, Any] | None = None
 
 
 class GenerateRequest(BaseModel):

@@ -14,7 +14,9 @@ from app.schemas import ChatRequest, ChatResponse
 from app.services.audit import log_action
 from app.services.briefing import build_clarification_state
 from app.services.brief_contract import build_brief_contract_payload, next_brief_status_after_chat
-from app.services.llm import chunk_response_text, generate_intake_turn
+from app.services.design_harness import DesignIntakeHarnessLoop
+from app.services.design_harness.trace_store import DesignHarnessTraceStore
+from app.services.llm import chunk_response_text
 
 
 router = APIRouter(
@@ -46,7 +48,8 @@ def _persist_turn(
     history = _history_for_project(db, project.id)
     db.add(ChatMessage(project_id=project.id, role="user", content=message, message_metadata=None))
 
-    turn = generate_intake_turn(message, project.brief_json or {}, history)
+    turn_result = DesignIntakeHarnessLoop().run(message, project.brief_json or {}, history)
+    turn = turn_result.as_legacy_turn()
     project.brief_json = turn["brief_json"]
     project.brief_status = next_brief_status_after_chat(project.brief_status)
     project.status = "intake"
@@ -57,16 +60,11 @@ def _persist_turn(
             project_id=project.id,
             role="ai",
             content=turn["assistant_response"],
-            message_metadata={
-                "needs_follow_up": turn["needs_follow_up"],
-                "follow_up_topics": turn["follow_up_topics"],
-                "source": turn["source"],
-                "assistant_payload": turn.get("assistant_payload", {}),
-                "conflicts": turn.get("conflicts", []),
-                "clarification_state": clarification_state,
-                "brief_contract": brief_contract,
-                "harness_trace": turn.get("harness_trace", {}),
-            },
+            message_metadata=DesignHarnessTraceStore().build_message_metadata(
+                turn=turn,
+                clarification_state=clarification_state,
+                brief_contract=brief_contract,
+            ),
         )
     )
     log_action(
@@ -114,6 +112,7 @@ def send_chat_message(
         brief_contract_state=turn["brief_contract_state"],
         brief_contract_label=turn["brief_contract_label"],
         brief_can_lock=turn["brief_can_lock"],
+        harness=turn.get("harness"),
     )
 
 

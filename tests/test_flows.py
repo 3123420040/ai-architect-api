@@ -106,6 +106,8 @@ def test_project_brief_chat_flow(client, session_payload):
     assert any(section["id"] == "site" for section in payload["clarification_state"]["sections"])
     assert payload["brief_contract_state"] in {"draft", "ready_to_lock", "reopened"}
     assert "harness_trace" not in payload
+    assert payload["harness"]["harness_id"] == "design_intake_harness"
+    assert payload["harness"]["trace_schema_version"] == "harness_trace_summary_v1"
     assert {
         "session_id",
         "status",

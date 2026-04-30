@@ -147,6 +147,69 @@ def test_project_brief_chat_flow(client, session_payload):
     assert isinstance(assistant_metadata["harness_machine_output"]["assumptions"], list)
 
 
+def test_ai_harness_state_and_emit_concept_input_snapshot(client, session_payload):
+    session = register(client, session_payload)
+    token = session["access_token"]
+    project = create_project(client, token)
+
+    chat_response = client.post(
+        f"/api/v1/projects/{project['id']}/chat",
+        json={"message": "Nhà phố 5x20m, 3 tầng, 3 phòng ngủ, 3 WC, thích nhà ấm sáng"},
+        headers=auth_headers(token),
+    )
+    assert chat_response.status_code == 200, chat_response.text
+
+    state_response = client.get(
+        f"/api/v1/projects/{project['id']}/ai-harness/state",
+        headers=auth_headers(token),
+    )
+    assert state_response.status_code == 200, state_response.text
+    state_payload = state_response.json()
+    assert state_payload["concept_input_available"] is True
+    assert state_payload["concept_design_input"]["schema_version"] == "concept_design_input_v1"
+    assert state_payload["concept_design_input"]["project"]["construction_ready"] is False
+
+    emit_response = client.post(
+        f"/api/v1/projects/{project['id']}/ai-harness/emit-concept-input",
+        headers=auth_headers(token),
+    )
+    assert emit_response.status_code == 200, emit_response.text
+    emit_payload = emit_response.json()
+    assert emit_payload["persisted"] is True
+    assert emit_payload["latest_concept_input_snapshot"]["payload"]["project"]["concept_only"] is True
+
+    history_response = client.get(
+        f"/api/v1/projects/{project['id']}/chat/history",
+        headers=auth_headers(token),
+    )
+    assistant_metadata = history_response.json()["messages"][-1]["metadata"]
+    snapshot = assistant_metadata["harness"]["latest_concept_input_snapshot"]
+    assert snapshot["schema_version"] == "concept_design_input_v1"
+    assert snapshot["payload"]["project"]["construction_ready"] is False
+
+
+def test_ai_harness_emit_blocks_missing_critical_data(client, session_payload):
+    session = register(client, session_payload)
+    token = session["access_token"]
+    project = create_project(client, token)
+
+    chat_response = client.post(
+        f"/api/v1/projects/{project['id']}/chat",
+        json={"message": "Nhà phố 3 tầng, 3 phòng ngủ, 2 WC, phong cách modern"},
+        headers=auth_headers(token),
+    )
+    assert chat_response.status_code == 200, chat_response.text
+
+    emit_response = client.post(
+        f"/api/v1/projects/{project['id']}/ai-harness/emit-concept-input",
+        headers=auth_headers(token),
+    )
+    assert emit_response.status_code == 409
+    detail = emit_response.json()["detail"]
+    assert detail["code"] == "CONCEPT_INPUT_BLOCKED"
+    assert "site.width_m" in detail["validation"]["critical_missing"]
+
+
 def test_project_list_returns_newest_projects_first(client, session_payload):
     session = register(client, session_payload)
     token = session["access_token"]

@@ -48,7 +48,13 @@ def _persist_turn(
     history = _history_for_project(db, project.id)
     db.add(ChatMessage(project_id=project.id, role="user", content=message, message_metadata=None))
 
-    turn_result = DesignIntakeHarnessLoop().run(message, project.brief_json or {}, history)
+    turn_result = DesignIntakeHarnessLoop().run(
+        message,
+        project.brief_json or {},
+        history,
+        project_id=project.id,
+        project_name=project.name,
+    )
     turn = turn_result.as_legacy_turn()
     project.brief_json = turn["brief_json"]
     project.brief_status = next_brief_status_after_chat(project.brief_status)

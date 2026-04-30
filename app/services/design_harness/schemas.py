@@ -34,6 +34,8 @@ class HarnessMachineOutput:
     readiness: dict[str, Any] = field(default_factory=dict)
     assumptions: list[dict[str, Any]] = field(default_factory=list)
     style_tools: dict[str, Any] = field(default_factory=dict)
+    concept_design_input: dict[str, Any] | None = None
+    concept_input_validation: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -158,6 +160,16 @@ class DesignHarnessTurnResult:
         harness = self.trace_metadata.public_summary()
         harness["readiness"] = self.machine.readiness
         harness["assumptions"] = self.machine.assumptions
+        harness["concept_input_status"] = self.machine.concept_input_validation.get("status")
+        harness["concept_input_available"] = self.machine.concept_design_input is not None
+        harness["concept_input_validation"] = self.machine.concept_input_validation
+        if self.machine.concept_design_input is not None:
+            harness["concept_design_input"] = self.machine.concept_design_input
+            harness["latest_concept_input_snapshot"] = {
+                "schema_version": self.machine.concept_design_input.get("schema_version"),
+                "payload": self.machine.concept_design_input,
+                "validation": self.machine.concept_input_validation,
+            }
         return {
             "assistant_response": self.conversation.assistant_response,
             "assistant_payload": self.conversation.assistant_payload,
@@ -173,6 +185,8 @@ class DesignHarnessTurnResult:
                 "readiness": self.machine.readiness,
                 "assumptions": self.machine.assumptions,
                 "style_tools": self.machine.style_tools,
+                "concept_design_input": self.machine.concept_design_input,
+                "concept_input_validation": self.machine.concept_input_validation,
             },
         }
 
@@ -184,6 +198,8 @@ class DesignHarnessTurnResult:
         readiness: dict[str, Any] | None = None,
         assumptions: list[dict[str, Any]] | None = None,
         style_tools: dict[str, Any] | None = None,
+        concept_design_input: dict[str, Any] | None = None,
+        concept_input_validation: dict[str, Any] | None = None,
         terminal_reason: str = "turn_completed",
     ) -> "DesignHarnessTurnResult":
         trace = turn.get("harness_trace") or {}
@@ -201,6 +217,8 @@ class DesignHarnessTurnResult:
             readiness=readiness or {},
             assumptions=assumptions or [],
             style_tools=style_tools or {},
+            concept_design_input=concept_design_input,
+            concept_input_validation=concept_input_validation or {},
         )
         trace_metadata = HarnessTraceMetadata(
             terminal_reason=terminal_reason,
@@ -277,3 +295,53 @@ class HarnessStyleToolOutput:
             "dislike_suppression": list(self.dislike_suppression),
             "reference_descriptor_matches": list(self.reference_descriptor_matches),
         }
+
+
+@dataclass(frozen=True)
+class FieldProvenance:
+    field_path: str
+    source: str
+    confidence: float
+    evidence: list[dict[str, Any]] = field(default_factory=list)
+    assumption_id: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["confidence"] = round(float(self.confidence), 2)
+        return payload
+
+
+@dataclass(frozen=True)
+class ConceptDesignInputV1:
+    project: dict[str, Any]
+    site: dict[str, Any]
+    program: dict[str, Any]
+    household: dict[str, Any]
+    style: dict[str, Any]
+    layout_intent: dict[str, Any]
+    assumptions: list[dict[str, Any]]
+    provenance: list[dict[str, Any]]
+    schema_version: str = "concept_design_input_v1"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "project": self.project,
+            "site": self.site,
+            "program": self.program,
+            "household": self.household,
+            "style": self.style,
+            "layout_intent": self.layout_intent,
+            "assumptions": self.assumptions,
+            "provenance": self.provenance,
+        }
+
+
+@dataclass(frozen=True)
+class ConceptInputCompilationResult:
+    concept_design_input: dict[str, Any] | None
+    validation: dict[str, Any]
+
+    @property
+    def is_valid(self) -> bool:
+        return self.concept_design_input is not None and self.validation.get("status") == "valid"

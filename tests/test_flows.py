@@ -108,6 +108,9 @@ def test_project_brief_chat_flow(client, session_payload):
     assert "harness_trace" not in payload
     assert payload["harness"]["harness_id"] == "design_intake_harness"
     assert payload["harness"]["trace_schema_version"] == "harness_trace_summary_v1"
+    assert payload["harness"]["readiness"]["schema_version"] == "design_harness_readiness_v1"
+    assert payload["harness"]["readiness"]["field_statuses"]["site.width_m"]["status"] == "confirmed"
+    assert isinstance(payload["harness"]["assumptions"], list)
     assert {
         "session_id",
         "status",
@@ -139,6 +142,9 @@ def test_project_brief_chat_flow(client, session_payload):
     assert trace["recent_history_count"] == 0
     assert "lot.width_m" in trace["merged_brief_changed_keys"]
     assert assistant_metadata["assistant_payload"]["source_metadata"]["trace_summary"] == trace
+    assert assistant_metadata["harness"]["readiness"]["schema_version"] == "design_harness_readiness_v1"
+    assert assistant_metadata["harness_machine_output"]["readiness"]["field_statuses"]["site.width_m"]["status"] == "confirmed"
+    assert isinstance(assistant_metadata["harness_machine_output"]["assumptions"], list)
 
 
 def test_project_list_returns_newest_projects_first(client, session_payload):
@@ -207,6 +213,7 @@ def test_chat_websocket_stream_persists_turn(client, session_payload):
     assert done_payload["clarification_state"]["total_sections"] >= 6
     assert done_payload["brief_contract_state"] in {"draft", "ready_to_lock", "reopened"}
     assert "harness_trace" not in done_payload
+    assert done_payload["harness"]["readiness"]["schema_version"] == "design_harness_readiness_v1"
 
     history_response = client.get(
         f"/api/v1/projects/{project['id']}/chat/history",

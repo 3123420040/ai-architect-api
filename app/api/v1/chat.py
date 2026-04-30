@@ -65,6 +65,7 @@ def _persist_turn(
                 "conflicts": turn.get("conflicts", []),
                 "clarification_state": clarification_state,
                 "brief_contract": brief_contract,
+                "harness_trace": turn.get("harness_trace", {}),
             },
         )
     )

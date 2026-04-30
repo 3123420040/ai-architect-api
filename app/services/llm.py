@@ -20,6 +20,8 @@ from app.services.briefing import (
 LLM_SOURCE = "llm_openai_compat"
 DETERMINISTIC_SOURCE = "deterministic"
 FALLBACK_SOURCE = "deterministic_fallback"
+TRACE_SCHEMA_VERSION = "harness_trace_summary_v1"
+INTAKE_PROMPT_ID = "intake_structured_extraction_v1"
 MAX_HISTORY_MESSAGES = 8
 MAX_MESSAGE_CHARS = 1600
 LLM_GATEWAY_ATTEMPTS = 2
@@ -83,6 +85,12 @@ UNSAFE_PATCH_KEYS = {
 }
 
 
+class LLMIntakeError(Exception):
+    def __init__(self, message: str, *, trace_updates: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.trace_updates = trace_updates or {}
+
+
 def llm_is_configured() -> bool:
     return bool(
         str(settings.openai_compat_base_url or "").strip()
@@ -132,7 +140,25 @@ def _build_deterministic_turn(
     source_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     analysis = analyze_message_to_brief(message, brief_json)
-    return _build_turn_from_analysis(message, analysis, source=source, source_metadata=source_metadata)
+    harness_trace = _build_harness_trace(
+        source=source,
+        message=message,
+        brief_json=brief_json,
+        history=[],
+        deterministic_analysis=analysis,
+        merged_brief=analysis["brief_json"],
+        validation_gates=[
+            _trace_gate("deterministic_analysis", "pass"),
+            _trace_gate("llm_configured", "skipped", "deterministic_turn"),
+        ],
+    )
+    return _build_turn_from_analysis(
+        message,
+        analysis,
+        source=source,
+        source_metadata=source_metadata,
+        harness_trace=harness_trace,
+    )
 
 
 def _build_turn_from_analysis(
@@ -141,12 +167,18 @@ def _build_turn_from_analysis(
     *,
     source: str,
     source_metadata: dict[str, Any] | None = None,
+    harness_trace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     updated_brief = analysis["brief_json"]
     clarification_state = build_clarification_state(updated_brief, analysis["conflicts"])
     assistant_payload = build_assistant_payload(message, analysis, clarification_state)
+    if harness_trace:
+        harness_trace = _redact_secrets(harness_trace)
     if source_metadata:
-        assistant_payload["source_metadata"] = source_metadata
+        safe_source_metadata = _redact_secrets(source_metadata)
+        if harness_trace:
+            safe_source_metadata["trace_summary"] = harness_trace
+        assistant_payload["source_metadata"] = safe_source_metadata
     assistant_response = render_assistant_response(assistant_payload)
 
     return {
@@ -158,43 +190,117 @@ def _build_turn_from_analysis(
         "follow_up_topics": missing_brief_fields(updated_brief, analysis["conflicts"]),
         "conflicts": analysis["conflicts"],
         "clarification_state": clarification_state,
+        "harness_trace": harness_trace or {},
     }
 
 
 def generate_intake_turn(message: str, brief_json: dict | None, history: Iterable[Any]) -> dict[str, Any]:
+    history_items = list(history or [])
     deterministic_analysis = analyze_message_to_brief(message, brief_json)
     if not llm_is_configured():
-        return _build_turn_from_analysis(message, deterministic_analysis, source=DETERMINISTIC_SOURCE)
+        harness_trace = _build_harness_trace(
+            source=DETERMINISTIC_SOURCE,
+            message=message,
+            brief_json=brief_json,
+            history=history_items,
+            deterministic_analysis=deterministic_analysis,
+            merged_brief=deterministic_analysis["brief_json"],
+            validation_gates=[
+                _trace_gate("deterministic_analysis", "pass"),
+                _trace_gate("llm_configured", "skipped", "missing_base_url_or_key_or_model"),
+                _trace_gate("deterministic_merge", "pass"),
+            ],
+        )
+        return _build_turn_from_analysis(
+            message,
+            deterministic_analysis,
+            source=DETERMINISTIC_SOURCE,
+            source_metadata={
+                "provider": "none",
+                "provider_family": "none",
+                "model": None,
+                "prompt": INTAKE_PROMPT_ID,
+                "prompt_id": INTAKE_PROMPT_ID,
+            },
+            harness_trace=harness_trace,
+        )
 
     try:
-        llm_payload = _call_intake_llm(
+        llm_payload, llm_trace_updates = _call_intake_llm(
             message=message,
             brief_json=brief_json or {},
-            history=history,
+            history=history_items,
             deterministic_analysis=deterministic_analysis,
         )
         analysis = _analysis_from_llm_payload(deterministic_analysis, llm_payload)
+        harness_trace = _build_harness_trace(
+            source=LLM_SOURCE,
+            message=message,
+            brief_json=brief_json,
+            history=history_items,
+            deterministic_analysis=deterministic_analysis,
+            merged_brief=analysis["brief_json"],
+            llm_response_byte_count=llm_trace_updates.get("llm_response_byte_count"),
+            parsed_payload_summary=_summarize_llm_payload(llm_payload),
+            validation_gates=[
+                _trace_gate("deterministic_analysis", "pass"),
+                _trace_gate("llm_configured", "pass"),
+                *_trace_gates_from_updates(llm_trace_updates),
+                _trace_gate(
+                    "brief_patch_sanitized",
+                    "pass",
+                    f"accepted={len(_flatten_keys(_sanitize_brief_patch(llm_payload.get('brief_patch'))))}",
+                ),
+                _trace_gate("brief_merge", "pass"),
+            ],
+        )
         return _build_turn_from_analysis(
             message,
             analysis,
             source=LLM_SOURCE,
             source_metadata={
                 "provider": "openai_compat",
+                "provider_family": "openai_compat",
                 "model": settings.openai_compat_model,
-                "prompt": "intake_structured_extraction_v1",
+                "prompt": INTAKE_PROMPT_ID,
+                "prompt_id": INTAKE_PROMPT_ID,
                 "confidence": llm_payload.get("confidence"),
             },
+            harness_trace=harness_trace,
         )
     except Exception as exc:
+        fallback_reason = _safe_error_message(exc)
+        trace_updates = exc.trace_updates if isinstance(exc, LLMIntakeError) else {}
+        harness_trace = _build_harness_trace(
+            source=FALLBACK_SOURCE,
+            message=message,
+            brief_json=brief_json,
+            history=history_items,
+            deterministic_analysis=deterministic_analysis,
+            merged_brief=deterministic_analysis["brief_json"],
+            llm_response_byte_count=trace_updates.get("llm_response_byte_count"),
+            parsed_payload_summary=trace_updates.get("parsed_payload_summary", {}),
+            validation_gates=[
+                _trace_gate("deterministic_analysis", "pass"),
+                _trace_gate("llm_configured", "pass"),
+                *_trace_gates_from_updates(trace_updates),
+                _trace_gate("deterministic_fallback", "pass", fallback_reason),
+            ],
+            fallback_reason=fallback_reason,
+        )
         return _build_turn_from_analysis(
             message,
             deterministic_analysis,
             source=FALLBACK_SOURCE,
             source_metadata={
                 "provider": "openai_compat",
+                "provider_family": "openai_compat",
                 "model": settings.openai_compat_model,
-                "fallback_reason": _safe_error_message(exc),
+                "prompt": INTAKE_PROMPT_ID,
+                "prompt_id": INTAKE_PROMPT_ID,
+                "fallback_reason": fallback_reason,
             },
+            harness_trace=harness_trace,
         )
 
 
@@ -204,18 +310,33 @@ def _call_intake_llm(
     brief_json: dict[str, Any],
     history: Iterable[Any],
     deterministic_analysis: dict[str, Any],
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     messages = _build_intake_prompt_messages(
         message=message,
         brief_json=brief_json,
         history=history,
         deterministic_analysis=deterministic_analysis,
     )
-    response = _post_openai_compat(messages)
-    content = _extract_chat_content(response)
+    trace_updates: dict[str, Any] = {
+        "llm_response_byte_count": 0,
+        "validation_gates": [],
+    }
+    try:
+        response = _post_openai_compat(messages)
+    except Exception as exc:
+        trace_updates["validation_gates"].append(_trace_gate("provider_call", "fail", _safe_error_message(exc)))
+        raise LLMIntakeError(_safe_error_message(exc), trace_updates=trace_updates) from exc
+    trace_updates["validation_gates"].append(_trace_gate("provider_call", "pass", "primary"))
+    try:
+        content = _extract_chat_content(response)
+    except Exception as exc:
+        trace_updates["validation_gates"].append(_trace_gate("response_content", "fail", _safe_error_message(exc)))
+        raise LLMIntakeError(_safe_error_message(exc), trace_updates=trace_updates) from exc
+    trace_updates["llm_response_byte_count"] += len(content.encode("utf-8"))
     try:
         payload = _extract_json_object(content)
     except Exception:
+        trace_updates["validation_gates"].append(_trace_gate("json_parse", "fail", "primary"))
         retry_messages = [
             *messages,
             {"role": "assistant", "content": _truncate(content, 1000) or "<empty response>"},
@@ -227,11 +348,32 @@ def _call_intake_llm(
                 ),
             },
         ]
-        retry_response = _post_openai_compat(retry_messages)
-        payload = _extract_json_object(_extract_chat_content(retry_response))
+        try:
+            retry_response = _post_openai_compat(retry_messages)
+        except Exception as exc:
+            trace_updates["validation_gates"].append(_trace_gate("provider_call_retry", "fail", _safe_error_message(exc)))
+            raise LLMIntakeError(_safe_error_message(exc), trace_updates=trace_updates) from exc
+        trace_updates["validation_gates"].append(_trace_gate("provider_call_retry", "pass"))
+        try:
+            retry_content = _extract_chat_content(retry_response)
+        except Exception as exc:
+            trace_updates["validation_gates"].append(_trace_gate("response_content_retry", "fail", _safe_error_message(exc)))
+            raise LLMIntakeError(_safe_error_message(exc), trace_updates=trace_updates) from exc
+        trace_updates["llm_response_byte_count"] += len(retry_content.encode("utf-8"))
+        try:
+            payload = _extract_json_object(retry_content)
+        except Exception as exc:
+            trace_updates["validation_gates"].append(_trace_gate("json_parse_retry", "fail"))
+            raise LLMIntakeError("invalid_json_after_retry", trace_updates=trace_updates) from exc
+        trace_updates["validation_gates"].append(_trace_gate("json_parse_retry", "pass"))
+    else:
+        trace_updates["validation_gates"].append(_trace_gate("json_parse", "pass", "primary"))
     if not isinstance(payload, dict):
-        raise ValueError("LLM response was not a JSON object")
-    return payload
+        trace_updates["validation_gates"].append(_trace_gate("payload_shape", "fail", "not_object"))
+        raise LLMIntakeError("llm_response_not_json_object", trace_updates=trace_updates)
+    trace_updates["validation_gates"].append(_trace_gate("payload_shape", "pass", "object"))
+    trace_updates["parsed_payload_summary"] = _summarize_llm_payload(payload)
+    return payload, trace_updates
 
 
 def _post_openai_compat(messages: list[dict[str, str]]) -> dict[str, Any]:
@@ -545,11 +687,182 @@ def _serialize_history(history: Iterable[Any]) -> list[dict[str, str]]:
     return serialized
 
 
+def _build_harness_trace(
+    *,
+    source: str,
+    message: str,
+    brief_json: dict | None,
+    history: Iterable[Any],
+    deterministic_analysis: dict[str, Any],
+    merged_brief: dict[str, Any],
+    llm_response_byte_count: int | None = None,
+    parsed_payload_summary: dict[str, Any] | None = None,
+    validation_gates: list[dict[str, str]] | None = None,
+    fallback_reason: str | None = None,
+) -> dict[str, Any]:
+    serialized_history = _serialize_history(history)
+    provider_family = "openai_compat" if source in {LLM_SOURCE, FALLBACK_SOURCE} else "none"
+    model = str(settings.openai_compat_model or "").strip() if provider_family == "openai_compat" else None
+    original_brief = brief_json or {}
+    return _redact_secrets(
+        {
+            "schema_version": TRACE_SCHEMA_VERSION,
+            "source": source,
+            "provider_family": provider_family,
+            "model": model,
+            "prompt_id": INTAKE_PROMPT_ID,
+            "request_summary": {
+                "latest_user_message_chars": len(message or ""),
+                "latest_user_message_truncated": len(message or "") > MAX_MESSAGE_CHARS,
+                "current_brief_keys": sorted(str(key) for key in original_brief.keys()),
+                "recent_history_count": len(serialized_history),
+                "max_history_messages": MAX_HISTORY_MESSAGES,
+                "max_message_chars": MAX_MESSAGE_CHARS,
+            },
+            "recent_history_count": len(serialized_history),
+            "deterministic_draft_summary": _summarize_analysis(deterministic_analysis, original_brief),
+            "llm_response_byte_count": llm_response_byte_count,
+            "parsed_payload_summary": parsed_payload_summary or {},
+            "validation_gates": validation_gates or [],
+            "fallback_reason": fallback_reason,
+            "merged_brief_changed_keys": _changed_keys(original_brief, merged_brief),
+        }
+    )
+
+
+def _summarize_analysis(analysis: dict[str, Any], original_brief: dict[str, Any]) -> dict[str, Any]:
+    brief = analysis.get("brief_json") or {}
+    facts = analysis.get("captured_facts") or []
+    conflicts = analysis.get("conflicts") or []
+    fact_keys = sorted(
+        str(item.get("key"))
+        for item in facts
+        if isinstance(item, dict) and item.get("key")
+    )
+    return {
+        "brief_keys": sorted(str(key) for key in brief.keys()),
+        "changed_keys": _changed_keys(original_brief, brief),
+        "captured_fact_count": len(facts) if isinstance(facts, list) else 0,
+        "captured_fact_keys": fact_keys[:12],
+        "conflict_count": len(conflicts) if isinstance(conflicts, list) else 0,
+        "project_switched": bool(analysis.get("project_switched")),
+    }
+
+
+def _summarize_llm_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_patch = payload.get("brief_patch") if isinstance(payload, dict) else None
+    sanitized_patch = _sanitize_brief_patch(raw_patch)
+    raw_patch_keys = _flatten_keys(raw_patch) if isinstance(raw_patch, dict) else []
+    sanitized_patch_keys = _flatten_keys(sanitized_patch)
+    return {
+        "brief_patch_keys": sanitized_patch_keys,
+        "dropped_patch_key_count": max(len(raw_patch_keys) - len(sanitized_patch_keys), 0),
+        "captured_fact_count": len(_sanitize_facts(payload.get("captured_facts"))),
+        "conflict_count": len(_sanitize_conflicts(payload.get("conflicts"))),
+        "confidence": _coerce_trace_number(payload.get("confidence")),
+    }
+
+
+def _trace_gate(name: str, status: str, detail: str | None = None) -> dict[str, str]:
+    gate = {"name": _redact_text(name), "status": _redact_text(status)}
+    if detail:
+        gate["detail"] = _redact_text(detail)
+    return gate
+
+
+def _trace_gates_from_updates(trace_updates: dict[str, Any]) -> list[dict[str, str]]:
+    gates = trace_updates.get("validation_gates")
+    if not isinstance(gates, list):
+        return []
+    safe_gates: list[dict[str, str]] = []
+    for gate in gates:
+        if not isinstance(gate, dict):
+            continue
+        name = _coerce_short_string(gate.get("name"), max_length=120)
+        status = _coerce_short_string(gate.get("status"), max_length=40)
+        if not name or not status:
+            continue
+        safe_gate = {"name": _redact_text(name), "status": _redact_text(status)}
+        detail = _coerce_short_string(gate.get("detail"), max_length=180)
+        if detail:
+            safe_gate["detail"] = _redact_text(detail)
+        safe_gates.append(safe_gate)
+    return safe_gates
+
+
+def _changed_keys(before: dict[str, Any], after: dict[str, Any], prefix: str = "") -> list[str]:
+    changed: list[str] = []
+    keys = sorted(set((before or {}).keys()) | set((after or {}).keys()))
+    for key in keys:
+        key_path = f"{prefix}.{key}" if prefix else str(key)
+        before_value = (before or {}).get(key)
+        after_value = (after or {}).get(key)
+        if isinstance(before_value, dict) or isinstance(after_value, dict):
+            before_nested = before_value if isinstance(before_value, dict) else {}
+            after_nested = after_value if isinstance(after_value, dict) else {}
+            changed.extend(_changed_keys(before_nested, after_nested, key_path))
+            continue
+        if before_value != after_value:
+            changed.append(key_path)
+    return changed[:60]
+
+
+def _flatten_keys(value: Any, prefix: str = "") -> list[str]:
+    if not isinstance(value, dict):
+        return []
+    keys: list[str] = []
+    for key in sorted(value.keys()):
+        key_path = f"{prefix}.{key}" if prefix else str(key)
+        keys.append(key_path)
+        if isinstance(value.get(key), dict):
+            keys.extend(_flatten_keys(value[key], key_path))
+    return keys[:80]
+
+
+def _coerce_trace_number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return round(float(value), 4)
+    return None
+
+
 def _truncate(value: str, max_chars: int) -> str:
     return value if len(value) <= max_chars else f"{value[:max_chars]}..."
 
 
+def _redact_secrets(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _redact_secrets(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_secrets(item) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_secrets(item) for item in value]
+    if isinstance(value, str):
+        return _redact_text(value)
+    return value
+
+
+def _redact_text(text: str) -> str:
+    cleaned = str(text)
+    configured_key = str(settings.openai_compat_api_key or "").strip()
+    if configured_key:
+        cleaned = cleaned.replace(configured_key, "[REDACTED_SECRET]")
+    patterns = [
+        (r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,;]+", r"\1[REDACTED_SECRET]"),
+        (r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{8,}", r"\1[REDACTED_SECRET]"),
+        (r"sk-[A-Za-z0-9_-]{4,}", "sk-[REDACTED_SECRET]"),
+        (
+            r"(?i)((?:api[_-]?key|token|secret|password)\s*[:=]\s*)[A-Za-z0-9._~+/=-]{6,}",
+            r"\1[REDACTED_SECRET]",
+        ),
+    ]
+    for pattern, replacement in patterns:
+        cleaned = re.sub(pattern, replacement, cleaned)
+    return cleaned
+
+
 def _safe_error_message(exc: Exception) -> str:
     text = str(exc).strip() or exc.__class__.__name__
-    text = re.sub(r"sk-[A-Za-z0-9_-]+", "sk-***", text)
+    text = _redact_text(text)
     return _truncate(text, 240)

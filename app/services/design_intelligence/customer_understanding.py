@@ -323,8 +323,11 @@ def _extract_dislike_style_features(normalized: str) -> tuple[str, ...]:
     feature_groups = {
         "too much glass": ("qua nhieu kinh", "nhieu kinh", "less glass", "giam kinh", "bot kinh", "it kinh", "unshaded glass"),
         "cold facade": ("mat tien lanh", "cold facade", "it lanh", "bot lanh"),
+        "cold/dark palette": ("cold dark palette", "cold/dark palette", "palette lanh toi", "mau lanh toi", "tone lanh toi", "toi lanh"),
         "glossy dark finishes": ("vat lieu toi bong", "toi bong", "glossy dark", "dark glossy"),
         "dark interior": ("noi that toi", "dark interior", "kin toi", "dong kin", "closed interior"),
+        "overly decorative indochine": ("overly decorative indochine", "indochine qua cau ky", "dong duong qua cau ky", "qua nhieu chi tiet dong duong", "too ornate indochine"),
+        "high-maintenance greenery": ("high maintenance greenery", "cay can cham nhieu", "cay can bao tri nhieu", "vuon kho cham", "ngai cham cay", "khong muon cham cay"),
         "closed kitchen": ("bep kin", "closed kitchen"),
         "narrow corridors": ("hanh lang hep", "narrow corridor", "narrow corridors"),
     }

@@ -7,8 +7,10 @@ from app.services.design_harness.schemas import (
     DesignHarnessTurnResult,
     HarnessConversationOutput,
     HarnessMachineOutput,
+    HarnessStyleToolOutput,
     HarnessTraceMetadata,
 )
+from app.services.design_harness.tools import DesignHarnessStyleTools
 
 __all__ = [
     "DesignHarnessTurnRequest",
@@ -16,8 +18,10 @@ __all__ = [
     "DesignAssumption",
     "DesignHarnessFieldStatus",
     "DesignHarnessReadiness",
+    "DesignHarnessStyleTools",
     "DesignIntakeHarnessLoop",
     "HarnessConversationOutput",
     "HarnessMachineOutput",
+    "HarnessStyleToolOutput",
     "HarnessTraceMetadata",
 ]

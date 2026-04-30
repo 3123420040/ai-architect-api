@@ -7,6 +7,7 @@ from typing import Any
 from app.services.design_harness.context_builder import DesignHarnessContextBuilder, build_turn_request
 from app.services.design_harness.model_client import ExistingIntakeModelClient
 from app.services.design_harness.schemas import DesignHarnessTurnResult
+from app.services.design_harness.tools import DesignHarnessStyleTools
 from app.services.design_harness.validators import DesignHarnessValidator
 
 
@@ -27,10 +28,12 @@ class DesignIntakeHarnessLoop:
         context_builder: DesignHarnessContextBuilder | None = None,
         model_client: ExistingIntakeModelClient | None = None,
         validator: DesignHarnessValidator | None = None,
+        style_tools: DesignHarnessStyleTools | None = None,
     ) -> None:
         self.context_builder = context_builder or DesignHarnessContextBuilder()
         self.model_client = model_client or ExistingIntakeModelClient()
         self.validator = validator or DesignHarnessValidator()
+        self.style_tools = style_tools or DesignHarnessStyleTools()
 
     def run(
         self,
@@ -42,12 +45,29 @@ class DesignIntakeHarnessLoop:
         context = self.context_builder.build(request)
         turn = self.model_client.generate_turn(context)
         validated_turn = self.validator.validate_turn(turn)
+
+        style_tool_output = self.style_tools.run(
+            str(context.get("message") or ""),
+            brief_json=context.get("brief_json") or {},
+        ).as_dict()
+        harness_trace = dict(validated_turn.get("harness_trace") or {})
+        validation_gates = list(harness_trace.get("validation_gates") or [])
+        validation_gates.append({"name": "style_pattern_tools", "status": "pass"})
+        harness_trace["validation_gates"] = validation_gates
+        assistant_payload = dict(validated_turn.get("assistant_payload") or {})
+        source_metadata = dict(assistant_payload.get("source_metadata") or {})
+        if source_metadata:
+            source_metadata["trace_summary"] = harness_trace
+            assistant_payload["source_metadata"] = source_metadata
+        validated_turn = {**validated_turn, "assistant_payload": assistant_payload, "harness_trace": harness_trace}
+
         readiness, assumptions = self.validator.compute_readiness(validated_turn, latest_message=request.message)
         enriched_turn = _attach_readiness_to_turn(validated_turn, readiness, assumptions)
         return DesignHarnessTurnResult.from_legacy_turn(
             enriched_turn,
             readiness=readiness,
             assumptions=assumptions,
+            style_tools=style_tool_output,
             terminal_reason=_terminal_reason(readiness),
         )
 

@@ -40,6 +40,9 @@ class DesignIntakeHarnessLoop:
         message: str,
         brief_json: dict | None = None,
         history: Iterable[Any] | None = None,
+        *,
+        project_id: str = "unknown",
+        project_name: str | None = None,
     ) -> DesignHarnessTurnResult:
         request = build_turn_request(message, brief_json, history or [])
         context = self.context_builder.build(request)
@@ -62,12 +65,22 @@ class DesignIntakeHarnessLoop:
         validated_turn = {**validated_turn, "assistant_payload": assistant_payload, "harness_trace": harness_trace}
 
         readiness, assumptions = self.validator.compute_readiness(validated_turn, latest_message=request.message)
+        concept_design_input, concept_input_validation = self.validator.compile_concept_input(
+            project_id=project_id,
+            project_name=project_name,
+            brief=validated_turn.get("brief_json") or {},
+            readiness=readiness,
+            assumptions=assumptions,
+            style_tools=style_tool_output,
+        )
         enriched_turn = _attach_readiness_to_turn(validated_turn, readiness, assumptions)
         return DesignHarnessTurnResult.from_legacy_turn(
             enriched_turn,
             readiness=readiness,
             assumptions=assumptions,
             style_tools=style_tool_output,
+            concept_design_input=concept_design_input,
+            concept_input_validation=concept_input_validation,
             terminal_reason=_terminal_reason(readiness),
         )
 

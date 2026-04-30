@@ -140,7 +140,11 @@ def list_projects(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> PaginatedProjects:
-    stmt = select(Project).where(Project.organization_id == current_user.organization_id)
+    stmt = (
+        select(Project)
+        .where(Project.organization_id == current_user.organization_id)
+        .order_by(Project.created_at.desc(), Project.id.desc())
+    )
     projects = db.scalars(stmt).all()
     if search:
         search_lower = search.lower()

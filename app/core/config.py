@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     gpu_service_url: str = "http://localhost:18001"
     openai_compat_base_url: str | None = None
     openai_compat_api_key: str | None = None
-    openai_compat_model: str = "gpt-5.4"
+    openai_compat_model: str = "kts"
     llm_request_timeout_seconds: float = 15.0
     storage_dir: Path = Field(default=ROOT_DIR / "storage")
     public_base_url: str = "http://localhost:3000"

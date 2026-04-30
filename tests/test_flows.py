@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import time
+
 
 def auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
@@ -110,6 +112,38 @@ def test_project_brief_chat_flow(client, session_payload):
     )
     assert history_response.status_code == 200
     assert len(history_response.json()["messages"]) == 2
+
+
+def test_project_list_returns_newest_projects_first(client, session_payload):
+    session = register(client, session_payload)
+    token = session["access_token"]
+
+    first_response = client.post(
+        "/api/v1/projects",
+        json={
+            "name": "Du an cu",
+            "client_name": "Anh A",
+            "client_phone": "0900000001",
+        },
+        headers=auth_headers(token),
+    )
+    assert first_response.status_code == 201, first_response.text
+    time.sleep(0.01)
+    second_response = client.post(
+        "/api/v1/projects",
+        json={
+            "name": "Du an moi",
+            "client_name": "Chi B",
+            "client_phone": "0900000002",
+        },
+        headers=auth_headers(token),
+    )
+    assert second_response.status_code == 201, second_response.text
+
+    list_response = client.get("/api/v1/projects", headers=auth_headers(token))
+    assert list_response.status_code == 200
+    project_ids = [item["id"] for item in list_response.json()["data"]]
+    assert project_ids[:2] == [second_response.json()["id"], first_response.json()["id"]]
 
 
 def test_chat_websocket_stream_persists_turn(client, session_payload):
